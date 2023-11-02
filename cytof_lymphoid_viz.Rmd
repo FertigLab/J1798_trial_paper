@@ -1,0 +1,137 @@
+---
+title: "J1798 PDAC trial - CyTOF lymphoid panel visualization"
+author: "Ludmila Danilova"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+rm(list = ls())
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(data.table)
+library("DT")
+library(gridExtra)
+library(scales)
+library(readxl)
+library(xlsx)
+library(pheatmap)
+library(pals)
+library(kableExtra)
+
+
+# set root folder
+rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+
+source(paste0(rootDir,"Scripts/parameters_and_functions.r"))
+
+```
+Create figures for CyTOF lymphoid panel data. Initial analysis was done by Won
+
+# Cell proportions
+
+## Bar plot
+
+```{r echo=FALSE}
+
+#=========================
+# read in sample annotation and mapping
+patTab = read.csv(file = paste0(rootDir,"for_paper/table_patients.csv"), row.names = 1)
+# switch to R/NR annotation
+patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
+
+#=============================
+# read in proportions
+props = read.csv(file = paste0(rootDir,"for_paper/table_cytof_lymphoid_props.csv"), row.names = 1)
+
+# transpose, extract time point and add response
+props = t(props)
+props = data.frame(
+  patientID = paste(sapply(strsplit(rownames(props), '_'), geti,1), sapply(strsplit(rownames(props), '_'), geti,2), sep = '_'),
+  timepoint = sapply(strsplit(rownames(props), '_'), geti,3), 
+  props, check.names = F)
+
+table(props$timepoint)
+# bar plot by time point
+clusters = factor(colnames(props)[3:ncol(props)], levels = c("M","B","DNT_I","DNT_II","DNT_III",
+                  "ThN_I","ThN_II","ThN_III","ThN_IV","ThN_V",
+                  "ThCM_I","ThCM_II","ThCM_III","ThCM_IV","ThCM_V","ThCM_VI",
+                  "ThEM_I","ThEM_II","ThEM_III","ThEM_IV","ThEM_V","ThEM_VI","ThEM_VII","ThEM_VIII","ThEM_IX","ThEM_X",
+                  "Treg",
+                  "TcN","TcEM","TcEFF_I","TcEFF_II","TcEFF_III","TcEFF_IV","TcEFF_V","TcEFF_VI",
+                  "NK_I","NK_II","NK_III","NK_IV")
+)
+
+# add response
+props = props %>% mutate(RECIST = patTab[patientID,"RECIST"])
+
+
+# cluster colors
+clustercolors <- toupper(as.character(c(cols25(n=25),alphabet(n=19)))[1:length(clusters)])
+names(clustercolors) <- levels(clusters)
+# Stacked bar plot
+df_melt = melt(props, id.vars = c("patientID", "timepoint"), measure.vars = clusters)
+print(ggplot(df_melt, aes(fill=variable, y=as.numeric(value), x=timepoint)) + 
+    geom_bar(position="fill", stat="identity")+
+      scale_fill_manual(values=clustercolors)+
+      ylab("Cell proportions") + xlab("Time point"))
+```
+
+## Table
+
+P-values from paired two-sided Wilcoxon test between time points and mean of difference between time points
+
+```{r table_props, echo=FALSE}
+# paired Wilcoxon
+
+res = t(sapply(as.character(clusters), pairedWilcox, props))
+
+res = round(res,3)
+write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/Cytof/table_cytof_lymphoid_wilcox_pvalues_proportions.csv"))
+
+knitr::kable(res, "simple",digits = 3)
+# significant proportions
+sigProp = apply(res[,grep("pValue",colnames(res))],2,function(x) names(x)[which(x < pVal)])
+
+print("Significant change (p-value < 0.05) in proportions of cells in the following cell types:")
+print(sigProp)
+
+```
+## Boxplots
+
+For significant cell types only
+
+```{r boxplot_props, echo=FALSE, fig.width= 4, fig.height= 3 }
+sigClusters = unique(unlist(sigProp))
+
+for(i in sigClusters)
+{
+  df = cbind(cluster = props[,i], props[,c("patientID", "timepoint", "RECIST") ] )
+#print(i)
+    print(ggpaired(df , x="timepoint",y="cluster", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
+     title = i, xlab="Time point", ylab = "Cell proportions") +
+       theme(legend.position="right") +
+#      scale_y_continuous(trans = "log10", labels = comma)+
+#      stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3]))), method = "wilcox.test", paired = T)+
+      scale_x_discrete(labels=timeLab))
+      
+}
+
+
+```
+
+```{r echo=FALSE}
+sessionInfo()
+```
+
+
+
+

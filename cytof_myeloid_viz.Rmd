@@ -1,0 +1,253 @@
+---
+title: "J1798 PDAC trial - CyTOF myeloid panel visualization"
+author: "Ludmila Danilova"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+rm(list = ls())
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(data.table)
+library("DT")
+library(gridExtra)
+library(scales)
+library(readxl)
+library(xlsx)
+library(pheatmap)
+library(pals)
+library(kableExtra)
+
+# set root folder
+rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+
+source(paste0(rootDir,"Scripts/parameters_and_functions.r"))
+
+```
+Create figures for CyTOF myeloid panel data. Initial analysis was done by Dimitri.
+
+# Cell proportions
+
+## Bar plot
+
+```{r echo=FALSE}
+
+#=========================
+# read in sample annotation and mapping
+patTab = read.csv(file = paste0(rootDir,"for_paper/table_patients.csv"), row.names = 1)
+# switch to R/NR annotation
+patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
+
+#=============================
+# read in proportions
+props = read.csv(file = paste0(rootDir,"for_paper/table_cytof_myeloid_props.csv"), row.names = 1)
+
+# transpose, extract time point and add response
+props = t(props)
+props = data.frame(
+  patientID = paste(sapply(strsplit(rownames(props), '_'), geti,1), sapply(strsplit(rownames(props), '_'), geti,2), sep = '_'),
+  timepoint = sapply(strsplit(rownames(props), '_'), geti,3), 
+  props, check.names = F)
+
+table(props$timepoint)
+# bar plot by time point
+clusters = factor(colnames(props)[3:ncol(props)])
+
+# add response
+props = props %>% mutate(RECIST = patTab[patientID,"RECIST"])
+
+
+# cluster colors
+clustercolors <- toupper(as.character(c(cols25(n=25),alphabet(n=19)))[1:length(clusters)])
+color_clusters1 <- clustercolors[1:nlevels(clusters)]
+names(color_clusters1) <- levels(clusters)
+# Stacked bar plot
+df_melt = melt(props, id.vars = c("patientID", "timepoint"), measure.vars = clusters)
+print(ggplot(df_melt, aes(fill=variable, y=as.numeric(value), x=timepoint)) + 
+    geom_bar(position="fill", stat="identity")+
+      scale_fill_manual(values=color_clusters1)+
+      ylab("Cell proportions") + xlab("Time point"))
+```
+
+## Table
+
+P-values from paired two-sided Wilcoxon test between time points and mean of difference between time points
+
+```{r table, echo=FALSE}
+# paired Wilcoxon
+
+# paired Wilcoxon test
+# k is a column in dat
+pairedWilcox = function(k, dat)
+{
+        mat <- data.frame(matrix(nrow = length(unique(dat$patientID)),
+      ncol = 3, dimnames = list(unique(dat$patientID),
+                      levels(factor(dat$timepoint)))), check.names = F)
+    for(i in levels(factor(dat$timepoint)))
+    {
+      d1 = dat %>% filter(timepoint == i)
+      mat[d1$patientID, i] = d1[,k]
+    }
+      
+    # running paired test
+    # Baseline vs C1D1
+    p1 = wilcox.test(mat[,1], mat[,2], paired = T)$p.value
+    #  C1D1 vs  C2D1
+    p2 = wilcox.test(mat[,2], mat[,3], paired = T)$p.value
+    #  Baseline vs  C2D1
+    p3 = wilcox.test(mat[,1], mat[,3], paired = T)$p.value
+   
+    # mean of delta between time points
+    d1 = mean(mat[,2] -  mat[,1], na.rm = T)
+    d2 = mean(mat[,3] -  mat[,2], na.rm = T)
+    d3 = mean(mat[,3] -  mat[,1], na.rm = T)
+   
+
+    return(c(pValue_BvsC1D1 = p1, 'mean(C1D1-B)' = d1, pValue_C1D1vsC2D2 = p2, 'mean(C2D2-C1D1)' = d2, pValue_BvsC2D2 = p3,'mean(C2D1-B)' = d3))
+}
+res = t(sapply(as.character(clusters), pairedWilcox, props))
+
+res = round(res,3)
+write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/Cytof/table_cytof_myeloid_wilcox_pvalues_proportions.csv"))
+
+knitr::kable(res, "simple",digits = 3)
+# significant proportions
+sigProp = apply(res[,grep("pValue",colnames(res))],2,function(x) names(x)[which(x < pVal)])
+
+print("Significant change (p-value < 0.05) in proportions of cells in the following cell types:")
+print(sigProp)
+
+```
+## Boxplots
+
+For significant cell types only
+
+```{r boxplots, echo=FALSE, fig.width= 4, fig.height= 3 }
+sigClusters = unique(unlist(sigProp))
+
+for(i in sigClusters)
+{
+  df = cbind(cluster = props[,i], props[,c("patientID", "timepoint", "RECIST") ] )
+#print(i)
+    print(ggpaired(df , x="timepoint",y="cluster", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
+     title = i, xlab="Time point", ylab = "Cell proportions") +
+       theme(legend.position="right") +
+#      scale_y_continuous(trans = "log10", labels = comma)+
+#      stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3]))), method = "wilcox.test", paired = T)+
+      scale_x_discrete(labels=timeLab))
+      
+}
+
+
+```
+
+# Average expression of markers by cluster
+
+## Table
+
+```{r echo=FALSE, fig.width= 4, fig.height= 3 }
+# read in expression
+expr = read.csv(file = paste0(rootDir,"for_paper/table_cytof_myeloid_marker_expression.csv"))
+
+# for every cluster run paired wilcoxon between time points for marker expression
+markers = colnames(expr)[4:ncol(expr)]
+
+# add response
+expr = expr %>% mutate(RECIST = patTab[patientID,"RECIST"])
+
+res1 = data.frame()
+for(i in clusters)
+{
+  res1 = rbind(res1, 
+              cbind(marker = markers, cluster = rep(i,length(markers)),
+                    round(t(sapply(as.character(markers), pairedWilcox, expr %>% filter(cluster == i))),3)))
+  
+}
+
+write.csv(res1, row.names = F, file = paste0(rootDir,"Results/Cytof/table_cytof_myeloid_wilcox_pvalues_marker_expression.csv"))
+
+datatable(res1)
+
+```
+
+## Boxplots
+### two time points
+
+```{r two-time-points, echo=FALSE, fig.width= 4, fig.height= 3 }
+sigMarkers = res1 %>% filter(pValue_BvsC1D1 < pVal)
+print("The number of pairs (cluster, marker) with significant change (p-value < 0.05) in marker expression between baseline and C1D1:")
+print(nrow(sigMarkers))
+
+for(i in 1:nrow(sigMarkers))
+{
+  # marker
+  m = sigMarkers[i,"marker"]
+  # cluster
+  k = sigMarkers[i,"cluster"]
+  d = expr %>% filter(cluster == k)
+  df = cbind(protein = d[,m], d[,c("patientID", "timepoint", "RECIST") ] )
+#print(i)
+  # remove C2D1 timepoint
+  df = df %>% filter(timepoint != "C2D1")
+  
+  print(paste0(m," in ", k))
+  
+    print(ggpaired(df , x="timepoint",y="protein", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
+     title = paste0(m," in ", k), xlab="Time point", ylab = "Marker Expression") +
+       theme(legend.position="right") +
+#      scale_y_continuous(trans = "log10", labels = comma)+
+#      stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3]))), method = "wilcox.test", paired = T)+
+      scale_x_discrete(labels=timeLab[1:2]))
+      
+}
+
+
+
+```
+
+### three time points
+
+```{r three-time-points, echo=FALSE, fig.width= 4, fig.height= 3 }
+
+for(i in 1:nrow(sigMarkers))
+{
+  # get marker
+  m = sigMarkers[i,"marker"]
+  # get cluster
+  k = sigMarkers[i,"cluster"]
+  # get expression for the cluster
+  d = expr %>% filter(cluster == k)
+  # create a data.frame to plot
+  df = cbind(protein = d[,m], d[,c("patientID", "timepoint", "RECIST") ] )
+  
+  # print current pair
+  print(paste0(m," in ", k))
+
+      print(ggpaired(df , x="timepoint",y="protein", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
+     title = paste0(m," in ", k), xlab="Time point", ylab = "Marker Expression") +
+       theme(legend.position="right") +
+#      scale_y_continuous(trans = "log10", labels = comma)+
+#      stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3]))), method = "wilcox.test", paired = T)+
+      scale_x_discrete(labels=timeLab))
+      
+}
+
+
+```
+
+```{r echo=FALSE}
+sessionInfo()
+```
+
+
+
+

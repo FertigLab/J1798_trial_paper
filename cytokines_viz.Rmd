@@ -1,0 +1,119 @@
+---
+title: "J1798 PDAC trial - Cytokine (Luminex) visualization"
+author: "Ludmila Danilova"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+rm(list = ls())
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(data.table)
+library("DT")
+library(gridExtra)
+library(scales)
+library(readxl)
+library(xlsx)
+library(pheatmap)
+library(pals)
+library(kableExtra)
+
+
+# set root folder
+rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+
+source(paste0(rootDir,"Scripts/parameters_and_functions.r"))
+
+```
+Create figures for cytokine data. 
+
+# Heatmap
+
+```{r echo=FALSE, fig.width = 10, fig.height=10}
+
+#=========================
+# read in sample annotation and mapping
+patTab = read.csv(file = paste0(rootDir,"for_paper/table_patients.csv"), row.names = 1)
+# switch to R/NR annotation
+patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
+
+
+#==
+panel = read.csv(file = paste0(rootDir,"for_paper/table_cytokine_panel.csv"), row.names = 1)
+
+cytokines = cbind(cytokines = rownames(panel), panel)
+
+#==
+# read cytokine values
+dat = read.csv(file = paste0(rootDir,"for_paper/table_cytokine_values.csv"), check.names = F)
+
+table(dat$timePoint)
+
+# fix colnames
+dat = dat %>% mutate(patientID = `Publication  ID`, timepoint = timePoint, RECIST = patTab[`Publication  ID`,"RECIST"])
+
+ord = order(dat$timePoint, dat$RECIST)
+
+pheatmap(t(log10(dat[ord, cytokines[,1]]+1)), scale = "column", annotation_col = dat[,c("RECIST", "timepoint")], annotation_colors = list(RECIST = recistCol[1:2], timepoint = timeCol), cluster_cols = T, show_colnames = F)
+
+
+```
+
+## Table
+
+P-values from paired two-sided Wilcoxon test between time points and mean of difference between time points
+
+```{r table_props, echo=FALSE}
+# paired Wilcoxon
+
+res = t(sapply(as.character(cytokines[,"cytokines"]), pairedWilcox, dat))
+
+res = round(res,3)
+write.csv(cbind(cytokine = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/Cytokines/table_cytokine_wilcox_pvalues.csv"))
+
+datatable(res)
+# significant proportions
+sig = apply(res[,grep("pValue",colnames(res))],2,function(x) names(x)[which(x < pVal)])
+
+print("Significant change (p-value < 0.05) in cytokine expression:")
+print(sig)
+
+```
+## Boxplots
+
+For significant only
+
+```{r boxplot_props, echo=FALSE, fig.width= 4, fig.height= 3 }
+sig = unique(unlist(sig))
+
+for(i in sig)
+{
+  df = cbind(cluster = dat[,i], dat[,c("patientID", "timepoint", "RECIST") ] )
+#print(i)
+    print(ggpaired(df , x="timepoint",y="cluster", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
+     title = i, xlab="Time point", ylab = paste(i,"(",cytokines[i,2],")")) +
+       theme(legend.position="right") +
+      scale_y_continuous(trans = "log10", labels = comma)+
+      scale_x_discrete(labels=timeLab))
+      
+}
+
+
+```
+
+```{r echo=FALSE}
+sessionInfo()
+```
+
+
+
+

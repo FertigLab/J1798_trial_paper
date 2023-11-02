@@ -1,0 +1,103 @@
+---
+title: "J1798 PDAC trial - Pathway analysis visualization"
+author: "Ludmila Danilova"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE, cache=TRUE,
+                      output_dir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/Analysis_HTMLs/")
+rm(list = ls())
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(data.table)
+library("DT")
+library(gridExtra)
+library(scales)
+library(readxl)
+library(xlsx)
+library(pheatmap)
+
+geti = function(x,i) {x[i]}
+
+
+```
+Create a dotplot with GSEA for different comparisons. Plot significant pathways only (adjusted p-values < 0.05). Color is the normalized enrichment score. Red/blue means higher/lower expression on the second time point.
+
+```{r echo=FALSE, fig.width=6, fig.height=6}
+# labels for time points
+timeLab  = c("Baseline", "C1D1", "C2D1")
+
+# set colors
+recistCol = c("NR" = "#F8766D","R" = "#619CFF")
+timeCol = setNames(c("black", 'grey45', 'grey75'), timeLab)
+
+# set root folder
+rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+
+# read in results of pathway analysis
+
+makeDotPlot = function(path)
+{
+  # list files with results
+  f = list.files(paste0(rootDir, "Results/Paired_Model/Pathway"), pattern = path, full.names = T)
+  # read in files with results and put all of them in one big table
+  # with comparison name, pathway names, and results
+  pathRes = c()
+  for(i in f)
+  {
+    # extract file name
+    n = basename(i)
+    # extract comparison name
+    n = sapply(strsplit(n, "_"), geti,1)
+    # read in file with results
+    dat = read.csv(i)
+    # add results to the big table
+    pathRes = rbind(pathRes, cbind(comparison = rep(n,nrow(dat)),dat))
+  
+  }
+  # make NES for not sugnificant pathways as NA
+  pathRes_ns = pathRes %>% mutate(NES, NES = ifelse(padj >0.05, NA, NES))
+  
+  # plot: dot plot
+  p = ggplot(data = pathRes_ns %>% filter(!is.na(NES)), aes(x = comparison, y = pathway, color = NES)) + 
+    geom_point(size = 4) +
+  #  scale_color_gradient(low = "red", high = "blue") +
+    scale_colour_gradient2(low = "blue", high = "red") +
+    scale_x_discrete(labels = c("Baseline vs C1D1", "Baseline vs C2D1","C1D1 vs C2D1")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+    theme_bw() + 
+    ylab("") + 
+    xlab("") +
+    ggtitle(path)
+  
+  print(p)
+}
+# specify what set to plot
+makeDotPlot("HALLMARK")
+
+#makeDotPlot("ONCOGENIC")
+```
+
+```{r echo=FALSE, fig.height=10}
+#makeDotPlot("KEGG")
+
+
+```
+
+
+```{r echo=FALSE}
+sessionInfo()
+```
+
+
+
+
