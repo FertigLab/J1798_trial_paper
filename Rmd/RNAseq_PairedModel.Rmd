@@ -267,7 +267,7 @@ Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj
 datatable(data.frame(C1D1vC2D1res))
 EnhancedVolcano(C1D1vC2D1res, lab=row.names(C1D1vC2D1res), 
                 x='log2FoldChange', y='padj', FCcutoff = 0.5,
-                pCutoff = 0.05, title = "Paired DE Results by Time -- C1D1vC2D1")
+                pCutoffCol = 'padj', pCutoff = 0.05, title = "Paired DE Results by Time -- C1D1vC2D1")
 
 C1D1vC2D1res_TopDE <- C1D1vC2D1res[C1D1vC2D1res$padj < 0.05 &
                               abs(C1D1vC2D1res$log2FoldChange) > 0.5,]
@@ -350,5 +350,8 @@ Create a dotplot with GSEA results for different comparisons. Plot significant p
 
   print(p)
 
+```
 
+```{r}
+sessionInfo()
 ```
