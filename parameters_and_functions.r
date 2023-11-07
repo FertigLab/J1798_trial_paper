@@ -12,9 +12,6 @@ pVal = 0.05
 recistCol = c("NR" = "#F8766D","R" = "#619CFF", "NonResponder" = "#F8766D","Responder" = "#619CFF")
 timeCol = setNames(c("black", 'grey45', 'grey75'), timeLab)
 
-# set root folder
-rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
-
 
 #==============================
 # Functions
@@ -26,9 +23,12 @@ geti = function(x,i) {x[i]}
 # k is a column in dat
 pairedWilcox = function(k, dat)
 {
-        mat <- data.frame(matrix(nrow = length(unique(dat$patientID)),
-      ncol = 3, dimnames = list(unique(dat$patientID),
-                      levels(factor(dat$timepoint)))), check.names = F)
+  # create matrix patients vs time points  
+  mat <- data.frame(matrix(nrow = length(unique(dat$patientID)),
+      ncol = length(unique(dat$timepoint)),
+      dimnames = list(unique(dat$patientID), levels(factor(dat$timepoint)))), 
+      check.names = F)
+  
     for(i in levels(factor(dat$timepoint)))
     {
       d1 = dat %>% filter(timepoint == i)

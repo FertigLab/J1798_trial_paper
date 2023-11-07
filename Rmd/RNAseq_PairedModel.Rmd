@@ -1,605 +1,219 @@
 ---
-title: "09_RNAseq_PairedModel"
-author: "Joe"
-date: "1/6/2023"
-knit: (function(inputFile, encoding) {
-  rmarkdown::render(inputFile, encoding = encoding, output_dir = "~/OneDrive - Johns Hopkins/J1798/Analysis_HTMLs/") })
+title: "RNAseq analysis"
+author: "Joseph A. Tandurella, Ludmila Danilova"
+date: "`r Sys.Date()`"
 output:
   html_document:
     toc: true
-    theme: united
-    keep_md: yes
+    toc_float: true
 ---
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, dev = "pdf")
-```
 
 # R libraries and versions
 
 Loading of R packages, setting seed for reproducability, and session info to provide version numbers.
 
 ```{r}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+rm(list = ls())
+
 library(tximport)
 library('readxl')
 library('DESeq2')
 library('ComplexHeatmap')
 library('EnhancedVolcano')
-library('pca3d')
-library('sva')
 library('DT')
 library('fgsea')
-library('GSVA')
 library(ggplot2)
 library(ggpubr)
 library(tidyverse)
 library(dplyr)
 library(tidyr)
 library(data.table)
-library(ggbiplot)
 library(msigdbr)
 library(fgsea)
+library(Matrix)
+library(ashr)
+
 set.seed(1234)
-sessionInfo()
 
-# labels for time points
-timeLab  = c("Baseline", "C1D1", "C2D1")
+# set root folder
+rootDir = "../"
 
-# set colors
-recistCol = c("NR" = "#F8766D","R" = "#619CFF")
-timeCol = setNames(c("black", 'grey45', 'grey75'), timeLab)
-
+source(paste0(rootDir,"parameters_and_functions.r"))
 
 ```
 
 
 ## Expression counts data
 
-Loading of raw counts using [tximport].
-
 ```{r}
-##Load Data and form initial objects
-dir <- ("C:/Users/Luda/OneDrive - Johns Hopkins/J1798")
 
-filesdirs <- list.files(path=paste0(dir,"/Data/RNAseq"), pattern = "_rsem_hg38.genes.results",full.names = T, recursive = T)
-txi.rsem <- tximport(filesdirs, type = "rsem", txIn = FALSE, txOut = FALSE)
-head(txi.rsem$counts)
-txi.rsem$length[txi.rsem$length == 0] <- 1
+exprsDat = read.csv(paste0(rootDir,"input_data/table_RNAseq.csv"), row.names = 1)
 
-files <- list.files(path=paste0(dir,"/Data/RNAseq"), pattern = "_rsem_hg38.genes.results",full.names = F, recursive = F)
-names <- str_split_fixed(files, "_rsem", 2)[,1]
-names <- str_replace_all(names, "-", "_")
-names <- str_split_fixed(names, "_5", 2)[,1]
+dim(exprsDat)
 
-##Add Names to txi.rsem
-colnames(txi.rsem$abundance) <- names
-colnames(txi.rsem$counts) <- names
-colnames(txi.rsem$length) <- names
-
-##Save exprsMat for cibersortx
-write.table(cbind(genes = rownames(txi.rsem$counts), txi.rsem$counts), file = paste0(dir,'/Data/J1798_rnaseq.tsv'), sep = '\t', quote = F, row.names = F)
-
-
-##Save Sequenced Sample Names
-write(names, paste0(dir,"/Data/J1798_Sequenced_SampleNames.csv"))
 ```
 
 
 ## Sample Annotations
 
-Loading of sample annotations file from Marina, adjusting sample names, re-saving.
-
 ```{r}
-sampAnnot <- as.data.frame(read_excel(paste0(dir,"/Data/Clinical_info/J1798 annotation file for correlative analyses_de-identified.xlsx"), 
-    sheet = "PDAC Patients"))
+#=========================
+# read in patient annotation and mapping
+patTab = read.csv(file = paste0(rootDir,"input_data/table_patients.csv"), row.names = 1)
+# switch to R/NR annotation
+patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
 
-sampAnnot <- sampAnnot[!is.na(sampAnnot$SampleID),]
-sampAnnot$SampleID <- gsub("-","_", sampAnnot$SampleID)
-sampAnnot$SampleID <- gsub(" ","_", sampAnnot$SampleID)
+# sample annotation
+sampAnnot = data.frame(
+  patientID = paste(sapply(strsplit(colnames(exprsDat), '_'), geti,1), sapply(strsplit(colnames(exprsDat), '_'), geti,2), sep = '_'),
+  timepoint = sapply(strsplit(colnames(exprsDat), '_'), geti,3), 
+  check.names = F)
 
-sampAnnot$SeqName <- paste(sampAnnot$SampleID,sampAnnot$TIME_ID, sep = "_")
-rownames(sampAnnot) <- sampAnnot$SeqName
+rownames(sampAnnot) = colnames(exprsDat)
 
-colnames(sampAnnot)[10] <- "RECIST"
-colnames(sampAnnot)[11] <- "CBR"
+table(sampAnnot$timepoint)
 
-sampAnnot$Sequenced <- ifelse(sampAnnot$SeqName%in%names, "1","0")
+# find pairs
+mat = sparseMatrix(i = as.numeric(as.factor(sampAnnot$patientID)), j = as.numeric(as.factor(sampAnnot$timepoint)), x = 1, 
+             dimnames = list(levels(as.factor(sampAnnot$patientID)),
+                             levels(as.factor(sampAnnot$timepoint))))
+mat = as.data.frame(as.matrix(mat))
 
-write_csv(sampAnnot,"~/OneDrive - Johns Hopkins/J1798/Data/J1798_annotation_w_CountsAnnotated.csv")
+cat("The number of paired samples between Baseline and C1D1:",
+mat %>% filter(Baseline == 1 & C1D1 == 1) %>% nrow)
+cat("The number of paired samples between Baseline and C2D1:",
+mat %>% filter(Baseline == 1 & C2D1 == 1) %>% nrow)
+cat("The number of paired samples between C2D1 and C1D1:",
+mat %>% filter(C2D1 == 1 & C1D1 == 1) %>% nrow)
 
 ```
 
 # Data normalization and exploratory data analysis
 
-## Limit data to treatment groups of interest
-
-Removing sample with 'PD' timepoint as it will not be used in future analysis here.
-
-```{r}
-sampAnnot <- sampAnnot[names,]
-sampAnnot <- sampAnnot[sampAnnot$TIME_ID != 'PD',]
-rownames(sampAnnot) <- sampAnnot$SeqName
-
-exprsDat <- txi.rsem$counts
-
-exprsDat <- exprsDat[,rownames(sampAnnot)]
-
-sampAnnot <- sampAnnot[colnames(exprsDat),]
-rownames(sampAnnot) <- sampAnnot$SeqName
-
-# write table with counts with pub IDs
-sampAnnot = sampAnnot %>% mutate(timePoint = 
-              factor(`Bx Timepoint`,levels = c("Baseline", "C1D1", "WK6"), labels = timeLab))
-print(table(sampAnnot$timePoint))
-
-tab = exprsDat
-colnames(tab) = paste(sampAnnot[colnames(exprsDat), "Publication  ID"], as.character(sampAnnot[colnames(exprsDat),"timePoint"]), sep = '_')
-write.csv(tab, file =paste0(dir,"/for_paper/table_RNAseq.csv"), quote = F) 
-
-
-
-```
 
 ## Evaluation of sample quality based upon distribution of reads
 
-We evaluate sample quality from the distribution of reads as visualized in a boxplot of log counts. We observe `r sum(apply(log2(exprsDat+1),2,median)==0)` samples with zero median expression (`rpaste(names(which(apply(log2(exprsDat+1),2,median)==0)), collapse="; ")`) reflective of low read count to be filtered from subsequent analysis as low quality.
+We evaluate sample quality from the distribution of reads as visualized in a boxplot of log counts. 
 
 ```{r}
-pdf(paste0(dir,"Figures/CountsQC.pdf"))
 boxplot(log2(exprsDat+1), ylab='log2(counts+1)', 
         xlab='samples', las=2, cex.axis = 0.25, 
         border = ifelse(apply(log2(exprsDat+1),2,median)==0,
-                        'red','black'))
-legend('topleft', pch=c('-'), legend = c('median > 0', 'median < 0'),
-       col=c('black','red'), cex=0.5)
-dev.off()
-
-datatable(cbind(sampAnnot,
-                lowCountFilter=apply(log2(exprsDat+1),2,median)>0))
-```
-
-```{r}
-sampAnnotMedianFilter <- sampAnnot[apply(log2(exprsDat+1),2,median)>0,]
-exprsDatMedian <- exprsDat[,apply(log2(exprsDat+1),2,median)>0]
-
-save(sampAnnotMedianFilter, file="~/OneDrive - Johns Hopkins/J1798/Data/sampAnnotMedianFilter.rda")
-save(exprsDatMedian, file="~/OneDrive - Johns Hopkins/J1798/Data/exprsDatMedian.rda")
-```
-
-## Add Cibersort Annotations
-
-Counts were extracted from the raw counts matrix (unsubset) and uploaded to [Cibersortx](https://cibersortx.stanford.edu). Imputation of cell fractions utilizing the LM22 CIBERSORT DEFAULT reference (signature matrix) to estimate T-cell presence based on gene expression. This was completed using [B-mode batch correction] (B-mode (bulk mode) batch correction removes technical differences between a signature matrix derived from bulk sorted reference profiles (e.g., bulk RNA-Seq or microarrays) and an input set of mixture samples. The technique can also be applied to signature matrices derived from scRNA-Seq platforms, provided that transcripts are measured analogously to bulk mixture expression profiles (e.g., full-length transcripts without UMIs profiled by SMART-Seq2)) and 1000 permutations for significance. 
-
-```{r}
-# cibersort data
-CIBERSORTx <- read.csv("~/OneDrive - Johns Hopkins/J1798/Results/Cibersort_Results/CIBERSORTx_Job26_Results.csv")
-CIBERSORTx_Res <- CIBERSORTx[,1:23]
-rownames(CIBERSORTx_Res) <- CIBERSORTx_Res$Mixture
-CIBERSORTx_Res <- CIBERSORTx_Res[,2:23]
-
-## Monocyte
-MonocyteProp <- apply(CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                       c('Monocytes', "Macrophages.M0", 
-                                         "Macrophages.M1", "Macrophages.M2")],1,sum)
-sampAnnotMedianFilter$Monocytes <- MonocyteProp[row.names(sampAnnotMedianFilter)]
-
-## CD4
-CD4Prop <- apply(CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                       c('T.cells.CD4.naive', "T.cells.CD4.memory.resting", 
-                                         "T.cells.CD4.memory.activated")],1,sum)
-sampAnnotMedianFilter$CD4 <- CD4Prop[row.names(sampAnnotMedianFilter)]
-
-## Dendritic 
-DendProp <- apply(CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                  c('Dendritic.cells.resting', "Dendritic.cells.activated")],1,sum)
-sampAnnotMedianFilter$Dendritic <- DendProp[row.names(sampAnnotMedianFilter)]
-
-## Mast
-MastProp <- apply(CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                   c('Mast.cells.resting', "Mast.cells.activated")],1,sum)
-sampAnnotMedianFilter$Mast <- MastProp[row.names(sampAnnotMedianFilter)]
-
-## CD8
-CD8Prop <- CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                   c('T.cells.CD8')]
-names(CD8Prop) <- rownames(CIBERSORTx_Res)
-sampAnnotMedianFilter$CD8 <- CD8Prop[row.names(sampAnnotMedianFilter)]
-
-## All T Cells
-TCellProp <- apply(CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                  c('T.cells.CD4.naive', "T.cells.CD4.memory.resting", 
-                                    "T.cells.CD4.memory.activated", "T.cells.CD8","T.cells.follicular.helper",
-                                    "T.cells.regulatory..Tregs.","T.cells.gamma.delta")],1,sum)
-sampAnnotMedianFilter$TCells <- TCellProp[row.names(sampAnnotMedianFilter)]
-
-## All B Cells
-BCellProp <- apply(CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                    c("B.cells.naive", "B.cells.memory", 
-                                      "Plasma.cells")],1,sum)
-sampAnnotMedianFilter$BCells <- BCellProp[row.names(sampAnnotMedianFilter)]
-
-## NK
-NKProp <- apply(CIBERSORTx_Res[,colnames(CIBERSORTx_Res) %in% 
-                                    c("NK.cells.resting", "NK.cells.activated")],1,sum)
-sampAnnotMedianFilter$NK <- NKProp[row.names(sampAnnotMedianFilter)]
-
+                        'red','black'), main = "Distribution of log-transformed counts")
 
 ```
 
-## Obtain normalized log counts with vst 
-
-[`DESeq2`](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8) is used for variance stabilization transformation for count normalization. 
-
-```{r}
-dds <- DESeqDataSetFromMatrix(countData = round(exprsDatMedian), 
-                              colData = sampAnnotMedianFilter, 
-                              design=~RECIST)
-vstDat <- assay(vst(dds))
-vstDat <- vstDat[apply(vstDat,1,sd)>0,]
-
-##Add VST FAP to the annotations
-##FAP
-sampAnnotMedianFilter$FAP <- vstDat["FAP",]
-```
-
-## Perform PCA analysis to evaluate sample clustering
-
-We use PCA of the `vst` normalized data to evaluate sample clustering.
-
-```{r}
-pcs <- prcomp(t(vstDat),scale=T)
-
-ggbiplot(pcs,groups = sampAnnotMedianFilter$RECIST, var.axes = F) +
-  guides(color = guide_legend(title = "RECIST")) + ggtitle("J1798 All Samples PCA")
-
-ggbiplot(pcs,groups = sampAnnotMedianFilter$CBR, var.axes = F) +
-  guides(color = guide_legend(title = "CBR")) + ggtitle("J1798 All Samples PCA")
-
-ggbiplot(pcs,groups = sampAnnotMedianFilter$BxSite, var.axes = F) +
-  guides(color = guide_legend(title = "BxSite")) + ggtitle("J1798 All Samples PCA")
-
-ggbiplot(pcs,groups = sampAnnotMedianFilter$TIME_ID, var.axes = F) +
-  guides(color = guide_legend(title = "TIME_ID")) + ggtitle("J1798 All Samples PCA")
-
-ggbiplot(pcs,groups = (sampAnnotMedianFilter$Tumor_Percentage), var.axes = F) +
-  guides(color = guide_legend(title = "Percent Tumor")) + ggtitle("J1798 All Samples PCA")
-
-ggbiplot(pcs,groups = sampAnnotMedianFilter$TCells, var.axes = F) +
-  guides(color = guide_legend(title = "Percent TCells")) + ggtitle("J1798 All Samples PCA")
-
-ggbiplot(pcs,groups = sampAnnotMedianFilter$Monocytes, var.axes = F) +
-  guides(color = guide_legend(title = "Percent Monocyte")) + ggtitle("J1798 All Samples PCA")
-
-ggbiplot(pcs,groups = sampAnnotMedianFilter$FAP, var.axes = F) +
-  guides(color = guide_legend(title = "Percent Monocyte")) + ggtitle("J1798 All Samples PCA")
-```
-
-## Sample numbers
-
-Printing of sample numbers after PCA.
-
-```{r}
-print("BSitexRECIST Counts")
-table(sampAnnotMedianFilter$BxSite,
-      sampAnnotMedianFilter$RECIST)
-print("BSitexCBR Counts")
-table(sampAnnotMedianFilter$BxSite,
-      sampAnnotMedianFilter$CBR)
-print("TIMExRECIST Counts")
-table(sampAnnotMedianFilter$TIME_ID,
-      sampAnnotMedianFilter$RECIST)
-print("TIMExCBR Counts")
-table(sampAnnotMedianFilter$TIME_ID,
-      sampAnnotMedianFilter$CBR)
-print("BSitexTime Counts")
-table(sampAnnotMedianFilter$BxSite,
-      sampAnnotMedianFilter$TIME_ID)
-
-print("BSite Counts")
-table(sampAnnotMedianFilter$BxSite)
-print("Timepoint Counts")
-table(sampAnnotMedianFilter$`Bx Timepoint`)
-print("RECIST Counts")
-table(sampAnnotMedianFilter$RECIST)
-print("CBR Counts")
-table(sampAnnotMedianFilter$CBR)
-```
-
-## Subset to Samples with both B and C1D1 timepoints to prevent tissue level gene discrepencies
+## Subset to paired samples
 
 Due to this analysis being paired, samples with matching timepoints were retained across all comparisons. Samples without matching timepoints were removed. 
 
 ```{r}
-##BvC
-BvCsampAnnotFilter <- sampAnnotMedianFilter[!sampAnnotMedianFilter$TIME_ID=="WK6",]
-pairedsamples <- BvCsampAnnotFilter[duplicated(BvCsampAnnotFilter$SampleID),]$SampleID
-BvCsampAnnotFilter <- BvCsampAnnotFilter[BvCsampAnnotFilter$SampleID %in% pairedsamples,]
-BvCexprsDatFilter <- exprsDat[,rownames(BvCsampAnnotFilter)]
+##BaselinevC1D1
+pairedsamples <- mat %>% filter(Baseline == 1 & C1D1 == 1) %>% rownames()
+# select paired samples and exclude a time point from comparison
+BaselinevC1D1sampAnnotFilter <- sampAnnot %>% filter(patientID %in% pairedsamples & timepoint != "C2D1")
+# subset expression data
+BaselinevC1D1exprsDatFilter <- exprsDat[,rownames(BaselinevC1D1sampAnnotFilter)]
 
-##BvWK6
-BvWK6sampAnnotFilter <- sampAnnotMedianFilter[!sampAnnotMedianFilter$TIME_ID=="C",]
-pairedsamples <- BvWK6sampAnnotFilter[duplicated(BvWK6sampAnnotFilter$SampleID),]$SampleID
-BvWK6sampAnnotFilter <- BvWK6sampAnnotFilter[BvWK6sampAnnotFilter$SampleID %in% pairedsamples,]
-BvWK6exprsDatFilter <- exprsDat[,rownames(BvWK6sampAnnotFilter)]
+##BaselinevC2D1
+pairedsamples <- mat %>% filter(Baseline == 1 & C2D1 == 1) %>% rownames()
+# select paired samples and exclude a time point from comparison
+BaselinevC2D1sampAnnotFilter <-  sampAnnot %>% filter(patientID %in% pairedsamples & timepoint != "C1D1")
+# subset expression data
+BaselinevC2D1exprsDatFilter <- exprsDat[,rownames(BaselinevC2D1sampAnnotFilter)]
 
-##CvWK6
-CvWK6sampAnnotFilter <- sampAnnotMedianFilter[!sampAnnotMedianFilter$TIME_ID=="B",]
-pairedsamples <- CvWK6sampAnnotFilter[duplicated(CvWK6sampAnnotFilter$SampleID),]$SampleID
-CvWK6sampAnnotFilter <- CvWK6sampAnnotFilter[CvWK6sampAnnotFilter$SampleID %in% pairedsamples,]
-CvWK6exprsDatFilter <- exprsDat[,rownames(CvWK6sampAnnotFilter)]
+##C1D1vC2D1
+pairedsamples <- mat %>% filter(C1D1 == 1 & C2D1 == 1) %>% rownames()
+# select paired samples and exclude a time point from comparison
+C1D1vC2D1sampAnnotFilter <- sampAnnot %>% filter(patientID %in% pairedsamples & timepoint != "Baseline")
+# subset expression data
+C1D1vC2D1exprsDatFilter <- exprsDat[,rownames(C1D1vC2D1sampAnnotFilter)]
 
 ##AllFinalSamples
-sampAnnotPaired <- sampAnnotMedianFilter[rownames(sampAnnotMedianFilter) %in% c(rownames(BvCsampAnnotFilter),rownames(BvWK6sampAnnotFilter),rownames(CvWK6sampAnnotFilter)),]
+sampAnnotPaired <- sampAnnot[rownames(sampAnnot) %in% c(rownames(BaselinevC1D1sampAnnotFilter),rownames(BaselinevC2D1sampAnnotFilter),rownames(C1D1vC2D1sampAnnotFilter)),]
 exprsDatPaired <- exprsDat[,rownames(sampAnnotPaired)]
-```
 
-
-# Save samples retained for analysis
-
-```{r}
-save(BvCsampAnnotFilter, file="~/OneDrive - Johns Hopkins/J1798/Data/BvC_paired_sampAnnotFilter.rda")
-save(BvCexprsDatFilter, file="~/OneDrive - Johns Hopkins/J1798/Data/BvC_paired_exprsDatFilter.rda")
-
-save(BvWK6sampAnnotFilter, file="~/OneDrive - Johns Hopkins/J1798/Data/BvWK6_paired_sampAnnotFilter.rda")
-save(BvWK6exprsDatFilter, file="~/OneDrive - Johns Hopkins/J1798/Data/BvWK6_paired_exprsDatFilter.rda")
-
-save(CvWK6sampAnnotFilter, file="~/OneDrive - Johns Hopkins/J1798/Data/CvWK6_paired_sampAnnotFilter.rda")
-save(CvWK6exprsDatFilter, file="~/OneDrive - Johns Hopkins/J1798/Data/CvWK6_paired_exprsDatFilter.rda")
-
-save(sampAnnotPaired, file="~/OneDrive - Johns Hopkins/J1798/Data/paired_sampAnnotFilter.rda")
-save(exprsDatPaired, file="~/OneDrive - Johns Hopkins/J1798/Data/paired_exprsDatFilter.rda")
-```
-
-## Re-Obtain normalized log counts with vst 
-
-[`DESeq2`](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8) is used for variance stabilization transformation for count normalization. 
-
-```{r}
-dds <- DESeqDataSetFromMatrix(countData = round(exprsDatPaired), 
-                              colData = sampAnnotPaired, 
-                              design=~RECIST)
-vstDat <- assay(vst(dds))
-vstDat <- vstDat[apply(vstDat,1,sd)>0,]
-```
-
-## Final sample numbers
-
-Printing sample numbers post-pairing subset
-
-```{r}
-## BvC Samples
-
-print("BSitexRECIST Counts")
-table(BvCsampAnnotFilter$BxSite,
-      BvCsampAnnotFilter$RECIST)
-print("BSitexCBR Counts")
-table(BvCsampAnnotFilter$BxSite,
-      BvCsampAnnotFilter$CBR)
-print("TIMExRECIST Counts")
-table(BvCsampAnnotFilter$TIME_ID,
-      BvCsampAnnotFilter$RECIST)
-print("TIMExCBR Counts")
-table(BvCsampAnnotFilter$TIME_ID,
-      BvCsampAnnotFilter$CBR)
-print("BSitexTime Counts")
-table(BvCsampAnnotFilter$BxSite,
-      BvCsampAnnotFilter$TIME_ID)
-
-print("BSite Counts")
-table(BvCsampAnnotFilter$BxSite)
-print("Timepoint Counts")
-table(BvCsampAnnotFilter$`Bx Timepoint`)
-print("RECIST Counts")
-table(BvCsampAnnotFilter$RECIST)
-print("CBR Counts")
-table(BvCsampAnnotFilter$CBR)
-
-## BvWK6 Samples
-
-print("BSitexRECIST Counts")
-table(BvWK6sampAnnotFilter$BxSite,
-      BvWK6sampAnnotFilter$RECIST)
-print("BSitexCBR Counts")
-table(BvWK6sampAnnotFilter$BxSite,
-      BvWK6sampAnnotFilter$CBR)
-print("TIMExRECIST Counts")
-table(BvWK6sampAnnotFilter$TIME_ID,
-      BvWK6sampAnnotFilter$RECIST)
-print("TIMExCBR Counts")
-table(BvWK6sampAnnotFilter$TIME_ID,
-      BvWK6sampAnnotFilter$CBR)
-print("BSitexTime Counts")
-table(BvWK6sampAnnotFilter$BxSite,
-      BvWK6sampAnnotFilter$TIME_ID)
-
-print("BSite Counts")
-table(BvWK6sampAnnotFilter$BxSite)
-print("Timepoint Counts")
-table(BvWK6sampAnnotFilter$`Bx Timepoint`)
-print("RECIST Counts")
-table(BvWK6sampAnnotFilter$RECIST)
-print("CBR Counts")
-table(BvWK6sampAnnotFilter$CBR)
-
-## CvWK6 Samples
-
-print("BSitexRECIST Counts")
-table(CvWK6sampAnnotFilter$BxSite,
-      CvWK6sampAnnotFilter$RECIST)
-print("BSitexCBR Counts")
-table(CvWK6sampAnnotFilter$BxSite,
-      CvWK6sampAnnotFilter$CBR)
-print("TIMExRECIST Counts")
-table(CvWK6sampAnnotFilter$TIME_ID,
-      CvWK6sampAnnotFilter$RECIST)
-print("TIMExCBR Counts")
-table(CvWK6sampAnnotFilter$TIME_ID,
-      CvWK6sampAnnotFilter$CBR)
-print("BSitexTime Counts")
-table(CvWK6sampAnnotFilter$BxSite,
-      CvWK6sampAnnotFilter$TIME_ID)
-
-print("BSite Counts")
-table(CvWK6sampAnnotFilter$BxSite)
-print("Timepoint Counts")
-table(CvWK6sampAnnotFilter$`Bx Timepoint`)
-print("RECIST Counts")
-table(CvWK6sampAnnotFilter$RECIST)
-print("CBR Counts")
-table(CvWK6sampAnnotFilter$CBR)
 ```
 
 
 # Differential expression and gene set analyses by Time (Treatment)
 
-As expressed above, the final samples numbers are retained:
-Baseline vs Entinostat-
-                              B  C
-  Paired                      13 13
-  peritoneum/omentum          2  3
-  right paracaval lymph node  1  0
-  
-Baseline vs Week 6-
-        B  WK6
-  Paired 4   4
-
-Entinostat vs Week 6-
-        C  WK6
-  Paired 4   4
-
-For the retained samples, we run differential expression analysis across time with [DESeq2](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8), including Tissue as a covariate in our model. Estimated fold changes are shrunk with `ashr` using `lfcShrink` to account for the variation in the samples in this dataset. Gene set statistics are run with [fgsea](https://www.biorxiv.org/content/10.1101/060012v3) with [MSigDb](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3106198/) v7.5.1 pathways annotated in [KEGG](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5210567/), REACTOME, [IMMUNESIGDB](http://dx.doi.org/10.1016/j.immuni.2015.12.006), and GO.
+For the retained samples, we run differential expression analysis across time with [DESeq2](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8), including Tissue as a covariate in our model. Estimated fold changes are shrunk with `ashr` using `lfcShrink` to account for the variation in the samples in this dataset. Gene set statistics are run with [fgsea](https://www.biorxiv.org/content/10.1101/060012v3) with Hallmark pathways from [MSigDb](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3106198/) v7.5.1.
 
 ```{r}
-# Get Pathways
-hallmark_df = msigdbr(species = "Homo sapiens", category = "H")
-hallmark_list = hallmark_df %>% split(x = .$gene_symbol, f = .$gs_name)
 
-oncogenic_df = msigdbr(species = "Homo sapiens", category = "C6")
-oncogenic_list = oncogenic_df %>% split(x = .$gene_symbol, f = .$gs_name)
-
-immunologic_df = msigdbr(species = "Homo sapiens", category = "C7")
-immunologic_list = immunologic_df %>% split(x = .$gene_symbol, f = .$gs_name)
-
-Curated_df = msigdbr(species = "Homo sapiens", category = "C2")
-kegg_list = Curated_df[Curated_df$gs_subcat=="CP:KEGG",] %>% split(x = .$gene_symbol, f = .$gs_name)
-reactome_list = Curated_df[Curated_df$gs_subcat=="CP:REACTOME",] %>% split(x = .$gene_symbol, f = .$gs_name)
-
-Ontology_df = msigdbr(species = "Homo sapiens", category = "C5")
-GOBP_list = Ontology_df[Ontology_df$gs_subcat=="GO:BP",] %>% split(x = .$gene_symbol, f = .$gs_name)
-GOMF_list = Ontology_df[Ontology_df$gs_subcat=="GO:MF",] %>% split(x = .$gene_symbol, f = .$gs_name)
-
-# DE 
-  samp <- BvCsampAnnotFilter[!is.na(BvCsampAnnotFilter$TIME_ID),]
+#DE
+  #=======================
+##Baseline V Entino
+# get samples from baseline and C1D1
+  samp <- BaselinevC1D1sampAnnotFilter[!is.na(BaselinevC1D1sampAnnotFilter$timepoint),]
   sampIds <- rownames(samp)
-  
-  ##DE by Time
-  BvCdds <- DESeqDataSetFromMatrix(countData =
-                                  round(BvCexprsDatFilter)[,colnames(BvCexprsDatFilter) %in% sampIds], 
-                              colData = samp, 
-                              design=~SampleID+TIME_ID)
-  BvCdds <- DESeq(BvCdds)
-  
-  
-  ##Baseline V Entino
-  BvCres <- results(BvCdds, contrast = c("TIME_ID","C", "B"))
-  BvCres <- lfcShrink(BvCdds, contrast = c("TIME_ID","C", "B"), res=BvCres, type="ashr")
-  BvCres <- BvCres[!is.na(BvCres$padj),]
+# create a DESeq object  
+BaselinevC1D1dds <- DESeqDataSetFromMatrix(
+    countData =                             round(BaselinevC1D1exprsDatFilter)[,colnames(BaselinevC1D1exprsDatFilter) %in% sampIds], 
+    colData = samp, 
+    design=~patientID+timepoint)
 
-#DE 
-  samp <- BvWK6sampAnnotFilter[!is.na(BvWK6sampAnnotFilter$TIME_ID),]
+  BaselinevC1D1dds <- DESeq(BaselinevC1D1dds)
+  
+ # get the result table 
+  BaselinevC1D1res <- results(BaselinevC1D1dds, contrast = c("timepoint","C1D1", "Baseline"))
+  BaselinevC1D1res <- lfcShrink(BaselinevC1D1dds, contrast = c("timepoint","C1D1", "Baseline"), res=BaselinevC1D1res, type="ashr")
+  BaselinevC1D1res <- BaselinevC1D1res[!is.na(BaselinevC1D1res$padj),]
+
+  #=======================
+##Baseline V C2D1
+  samp <- BaselinevC2D1sampAnnotFilter[!is.na(BaselinevC2D1sampAnnotFilter$timepoint),]
   sampIds <- rownames(samp) 
   
   ##DE by Time
-  BvWK6dds <- DESeqDataSetFromMatrix(countData =
-                                  round(BvWK6exprsDatFilter)[,colnames(BvWK6exprsDatFilter) %in% sampIds], 
+  BaselinevC2D1dds <- DESeqDataSetFromMatrix(countData =
+                                  round(BaselinevC2D1exprsDatFilter)[,colnames(BaselinevC2D1exprsDatFilter) %in% sampIds], 
                               colData = samp, 
-                              design=~SampleID+TIME_ID)
-  BvWK6dds <- DESeq(BvWK6dds)
+                              design=~patientID+timepoint)
   
-  ##Baseline V WK6
-  BvWK6res <- results(BvWK6dds, contrast = c("TIME_ID","WK6", "B"))
-  BvWK6res <- lfcShrink(BvWK6dds, contrast = c("TIME_ID","WK6", "B"), res=BvWK6res, type="ashr")
-  BvWK6res <- BvWK6res[!is.na(BvWK6res$padj),]
+  BaselinevC2D1dds <- DESeq(BaselinevC2D1dds)
+  BaselinevC2D1res <- results(BaselinevC2D1dds, contrast = c("timepoint","C2D1", "Baseline"))
+  BaselinevC2D1res <- lfcShrink(BaselinevC2D1dds, contrast = c("timepoint","C2D1", "Baseline"), res=BaselinevC2D1res, type="ashr")
+  BaselinevC2D1res <- BaselinevC2D1res[!is.na(BaselinevC2D1res$padj),]
 
+  #=======================
+##Entino v C2D1
 # DE 
-  samp <- CvWK6sampAnnotFilter[!is.na(CvWK6sampAnnotFilter$TIME_ID),]
+  samp <- C1D1vC2D1sampAnnotFilter[!is.na(C1D1vC2D1sampAnnotFilter$timepoint),]
   sampIds <- rownames(samp)
   
   ##DE by Time
-  CvWK6dds <- DESeqDataSetFromMatrix(countData =
-                                  round(CvWK6exprsDatFilter)[,colnames(CvWK6exprsDatFilter) %in% sampIds], 
+  C1D1vC2D1dds <- DESeqDataSetFromMatrix(countData =
+                                  round(C1D1vC2D1exprsDatFilter)[,colnames(C1D1vC2D1exprsDatFilter) %in% sampIds], 
                               colData = samp, 
-                              design=~SampleID+TIME_ID)
-  CvWK6dds <- DESeq(CvWK6dds)
+                              design=~patientID+timepoint)
+  C1D1vC2D1dds <- DESeq(C1D1vC2D1dds)
   
-  ##Entino v WK6
-  CvWK6res <- results(CvWK6dds, contrast = c("TIME_ID","WK6", "C"))
-  CvWK6res <- lfcShrink(CvWK6dds, contrast = c("TIME_ID","WK6", "C"), res=CvWK6res, type="ashr")
-  CvWK6res <- CvWK6res[!is.na(CvWK6res$padj),]
+  C1D1vC2D1res <- results(C1D1vC2D1dds, contrast = c("timepoint","C2D1", "C1D1"))
+  C1D1vC2D1res <- lfcShrink(C1D1vC2D1dds, contrast = c("timepoint","C2D1", "C1D1"), res=C1D1vC2D1res, type="ashr")
+  C1D1vC2D1res <- C1D1vC2D1res[!is.na(C1D1vC2D1res$padj),]
   
   
   #Extract Stats for Pathway Analysis
-  BvCstats <- BvCres$log2FoldChange
-  names(BvCstats) <- row.names(BvCres)
+  BaselinevC1D1stats <- BaselinevC1D1res$log2FoldChange
+  names(BaselinevC1D1stats) <- row.names(BaselinevC1D1res)
 
-  BvWK6stats <- BvWK6res$log2FoldChange
-  names(BvWK6stats) <- row.names(BvWK6res)
+  BaselinevC2D1stats <- BaselinevC2D1res$log2FoldChange
+  names(BaselinevC2D1stats) <- row.names(BaselinevC2D1res)
   
-  CvWK6stats <- CvWK6res$log2FoldChange
-  names(CvWK6stats) <- row.names(CvWK6res)
+  C1D1vC2D1stats <- C1D1vC2D1res$log2FoldChange
+  names(C1D1vC2D1stats) <- row.names(C1D1vC2D1res)
   
-  #Complete Pathway Analysis
-  BvCgsResults <- list(HALLMARK=fgsea(pathways=hallmark_list, 
-                               stats=BvCstats),
-                    ONCOGENIC=fgsea(pathways=oncogenic_list, 
-                               stats=BvCstats),
-                    IMMUNE=fgsea(pathways=immunologic_list, 
-                               stats=BvCstats),
-                    KEGG=fgsea(pathways=kegg_list, 
-                               stats=BvCstats),
-                    REACTOME=fgsea(pathways=reactome_list, 
-                               stats=BvCstats),
-                    GOBP=fgsea(pathways=GOBP_list, 
-                               stats=BvCstats),
-                    GOMF=fgsea(pathways=GOMF_list, 
-                               stats=BvCstats))
-  
-  BvWK6gsResults <- list(HALLMARK=fgsea(pathways=hallmark_list, 
-                               stats=BvWK6stats),
-                    ONCOGENIC=fgsea(pathways=oncogenic_list, 
-                               stats=BvWK6stats),
-                    IMMUNE=fgsea(pathways=immunologic_list, 
-                               stats=BvWK6stats),
-                    KEGG=fgsea(pathways=kegg_list, 
-                               stats=BvWK6stats),
-                    REACTOME=fgsea(pathways=reactome_list, 
-                               stats=BvWK6stats),
-                    GOBP=fgsea(pathways=GOBP_list, 
-                               stats=BvWK6stats),
-                    GOMF=fgsea(pathways=GOMF_list, 
-                               stats=BvWK6stats))
-    
-  CvWK6gsResults <- list(HALLMARK=fgsea(pathways=hallmark_list, 
-                               stats=CvWK6stats),
-                    ONCOGENIC=fgsea(pathways=oncogenic_list, 
-                               stats=CvWK6stats),
-                    IMMUNE=fgsea(pathways=immunologic_list, 
-                               stats=CvWK6stats),
-                    KEGG=fgsea(pathways=kegg_list, 
-                               stats=CvWK6stats),
-                    REACTOME=fgsea(pathways=reactome_list, 
-                               stats=CvWK6stats),
-                    GOBP=fgsea(pathways=GOBP_list, 
-                               stats=CvWK6stats),
-                    GOMF=fgsea(pathways=GOMF_list, 
-                               stats=CvWK6stats))
 ```
 
 ## Paired DE Results
 
 For each comparison, a datatable of results and volcanoplot will be provided. Plotted on the y-axis is the p-value (unadjusted), on the x-axis is the Log2 Fold Change.
 
-### BvC DE Plots
+### BaselinevC1D1 DE Plots
 
 Positive Log2 Fold Change = enriched in Entinostat samples.
 Negative Log2 Fold Change = enriched in Baseline samples.
@@ -607,23 +221,20 @@ Negative Log2 Fold Change = enriched in Baseline samples.
 Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj < 0.05
 
 ```{r}
-##BvC
-datatable(data.frame(BvCres))
-EnhancedVolcano(BvCres, lab=row.names(BvCres), 
-                x='log2FoldChange', y='pvalue', FCcutoff = 0.5,
-                pCutoff = 0.05, title = "Paired DE Results by Time -- BvC")
+##BaselinevC1D1
+datatable(data.frame(BaselinevC1D1res))
+EnhancedVolcano(BaselinevC1D1res, lab=row.names(BaselinevC1D1res), 
+                x='log2FoldChange', y='padj', FCcutoff = 0.5,
+                pCutoff = 0.05, title = "Paired DE Results by Time -- BaselinevC1D1")
 
-BvCres_DEGenes <- row.names(BvCres)[BvCres$pvalue < 0.05 &
-                              abs(BvCres$log2FoldChange) > 0.5]
+BaselinevC1D1res_TopDE <- BaselinevC1D1res[BaselinevC1D1res$padj < 0.05 &
+                              abs(BaselinevC1D1res$log2FoldChange) > 0.5,]
 
-BvCres_TopDE <- BvCres[BvCres$padj < 0.05 &
-                              abs(BvCres$log2FoldChange) > 0.5,]
-
-write.csv(BvCres_TopDE, "~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/DE/BvCres_TopDE_Time.csv")
+write.csv(BaselinevC1D1res_TopDE, paste0(rootDir,"output_data/Baseline_vs_C1D1_TopDE.csv"))
 
 ```
 
-### BvWK6 DE Plots
+### BaselinevC2D1 DE Plots
 
 Positive Log2 Fold Change = enriched in Week 6 samples.
 Negative Log2 Fold Change = enriched in Baseline samples.
@@ -631,23 +242,20 @@ Negative Log2 Fold Change = enriched in Baseline samples.
 Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj < 0.05
 
 ```{r}
-##BvWK6
-datatable(data.frame(BvWK6res))
-EnhancedVolcano(BvWK6res, lab=row.names(BvWK6res), 
-                x='log2FoldChange', y='pvalue', FCcutoff = 0.5,
-                pCutoff = 0.05, title = "Paired DE Results by Time -- BvWK6")
+##BaselinevC2D1
+datatable(data.frame(BaselinevC2D1res))
+EnhancedVolcano(BaselinevC2D1res, lab=row.names(BaselinevC2D1res), 
+                x='log2FoldChange', y='padj', FCcutoff = 0.5,
+                pCutoff = 0.05, title = "Paired DE Results by Time -- BaselinevC2D1")
 
-BvWK6res_DEGenes <- row.names(BvWK6res)[BvWK6res$pvalue < 0.05 &
-                              abs(BvWK6res$log2FoldChange) > 0.5]
+BaselinevC2D1res_TopDE <- BaselinevC2D1res[BaselinevC2D1res$padj < 0.05 &
+                              abs(BaselinevC2D1res$log2FoldChange) > 0.5,]
 
-BvWK6res_TopDE <- BvWK6res[BvWK6res$padj < 0.05 &
-                              abs(BvWK6res$log2FoldChange) > 0.5,]
-
-write.csv(BvWK6res_TopDE, "~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/DE/BvWK6res_TopDE_Time.csv")
+write.csv(BaselinevC2D1res_TopDE, paste0(rootDir,"output_data/Baseline_vs_C2D1_TopDE.csv"))
 
 ```
 
-### CvWK6 DE Plots
+### C1D1vC2D1 DE Plots
 
 Positive Log2 Fold Change = enriched in Week 6 samples.
 Negative Log2 Fold Change = enriched in Entinostat samples.
@@ -655,852 +263,92 @@ Negative Log2 Fold Change = enriched in Entinostat samples.
 Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj < 0.05
 
 ```{r}
-##CvWK6
-datatable(data.frame(CvWK6res))
-EnhancedVolcano(CvWK6res, lab=row.names(CvWK6res), 
-                x='log2FoldChange', y='pvalue', FCcutoff = 0.5,
-                pCutoff = 0.05, title = "Paired DE Results by Time -- CvWK6")
+##C1D1vC2D1
+datatable(data.frame(C1D1vC2D1res))
+EnhancedVolcano(C1D1vC2D1res, lab=row.names(C1D1vC2D1res), 
+                x='log2FoldChange', y='padj', FCcutoff = 0.5,
+                pCutoff = 0.05, title = "Paired DE Results by Time -- C1D1vC2D1")
 
-CvWK6res_DEGenes <- row.names(CvWK6res)[CvWK6res$pvalue < 0.05 &
-                              abs(CvWK6res$log2FoldChange) > 0.5]
+C1D1vC2D1res_TopDE <- C1D1vC2D1res[C1D1vC2D1res$padj < 0.05 &
+                              abs(C1D1vC2D1res$log2FoldChange) > 0.5,]
 
-CvWK6res_TopDE <- CvWK6res[CvWK6res$padj < 0.05 &
-                              abs(CvWK6res$log2FoldChange) > 0.5,]
-
-write.csv(CvWK6res_TopDE, "~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/DE/CvWK6res_TopDE_Time.csv")
+write.csv(C1D1vC2D1res_TopDE, paste0(rootDir,"output_data/C1D1_vs_C2D1_TopDE.csv"))
 
 ```
 
-### Heatmaps of DE For visual
-```{r, include=FALSE}
-# sampAnnotFilter$NR1D1 <- dds@assays@data$counts["NR1D1",rownames(sampAnnotFilter)]
-# sampAnnotFilter$ADAM33 <- dds@assays@data$counts["ADAM33",rownames(sampAnnotFilter)]
-# 
-# ggplot(sampAnnotFilter, aes(x=TIME_ID,y=NR1D1))+geom_boxplot()+geom_point()
-# 
-# ggplot(sampAnnotFilter, aes(x=BxSite,y=ADAM33))+geom_boxplot()+geom_point()
-```
-
-```{r}
-##BvC -- one gene present, not enough for heatmap.
-# dfAnnot = data.frame(Treatment=BvCsampAnnotFilter[,'Bx Timepoint'],
-#                      RECIST=BvCsampAnnotFilter[,'RECIST'],
-#                      CBR=BvCsampAnnotFilter[,'CBR'],
-#                      Tumor_Percent=BvCsampAnnotFilter[,"Tumor_Percentage"],
-#                      Monocyte_Cibersort=BvCsampAnnotFilter[,"Monocytes"], row.names = rownames(BvCsampAnnotFilter))
-# 
-# HA <- HeatmapAnnotation(df = dfAnnot,
-#                         col=list(Treatment =
-#                                    c('Baseline'='blue',
-#                                      'C1D1'='red')))
-# 
-# 
-# Heatmap(t(apply(vstDat[BvCres_DEGenes, rownames(dfAnnot)],1,scale)),top_annotation = HA,
-#         clustering_distance_rows = 'pearson', 
-#         clustering_distance_columns = 'pearson',
-#         row_names_gp = gpar(fontsize = 6), column_title="Baseline v Entinostat DE Genes")
-
-##BvWK6
-dfAnnot = data.frame(Treatment=BvWK6sampAnnotFilter[,'Bx Timepoint'],
-                     RECIST=BvWK6sampAnnotFilter[,'RECIST'],
-                     CBR=BvWK6sampAnnotFilter[,'CBR'],
-                     Tumor_Percent=BvWK6sampAnnotFilter[,"Tumor_Percentage"],
-                     Monocyte_Cibersort=BvWK6sampAnnotFilter[,"Monocytes"], row.names = rownames(BvWK6sampAnnotFilter))
-
-HA <- HeatmapAnnotation(df = dfAnnot,
-                        col=list(Treatment =
-                                   c('Baseline'='blue',
-                                     'WK6'='yellow')))
-
-
-Heatmap(t(apply(vstDat[BvWK6res_DEGenes, rownames(dfAnnot)],1,scale)),top_annotation = HA,
-        clustering_distance_rows = 'pearson', 
-        clustering_distance_columns = 'pearson',
-        row_names_gp = gpar(fontsize = 6), column_title="Baseline v Week 6 DE Genes")
-
-##CvWK6
-dfAnnot = data.frame(Treatment=CvWK6sampAnnotFilter[,'Bx Timepoint'],
-                     RECIST=CvWK6sampAnnotFilter[,'RECIST'],
-                     CBR=CvWK6sampAnnotFilter[,'CBR'],
-                     Tumor_Percent=CvWK6sampAnnotFilter[,"Tumor_Percentage"],
-                     Monocyte_Cibersort=CvWK6sampAnnotFilter[,"Monocytes"], row.names = rownames(CvWK6sampAnnotFilter))
-
-HA <- HeatmapAnnotation(df = dfAnnot,
-                        col=list(Treatment =
-                                   c('C1D1'='red',
-                                     'WK6'='yellow')))
-
-
-Heatmap(t(apply(vstDat[CvWK6res_DEGenes, rownames(dfAnnot)],1,scale)),top_annotation = HA,
-        clustering_distance_rows = 'pearson', 
-        clustering_distance_columns = 'pearson',
-        row_names_gp = gpar(fontsize = 6), column_title="Entinostat v Week 6 DE Genes")
-
-
-##All DE genes plotted on all patients -- genes grouped by which comparison they came from
-dfAnnot = data.frame(Treatment=sampAnnotPaired[,'Bx Timepoint'],
-                     RECIST=sampAnnotPaired[,'RECIST'],
-                     CBR=sampAnnotPaired[,'CBR'],
-                     Tumor_Percent=sampAnnotPaired[,"Tumor_Percentage"],
-                     Monocyte_Cibersort=sampAnnotPaired[,"Monocytes"], row.names = rownames(sampAnnotPaired))
-
-HA <- HeatmapAnnotation(df = dfAnnot,
-                        col=list(Arm =
-                                   c('Baseline'='blue',
-                                     'C1D1' = 'red',
-                                     'WK6'='yellow')))
-
-#Find overlaps, make new object of genes w/ overlap and w/o overlap
-CvWK6nBvWK6genes <- intersect(CvWK6res_DEGenes,BvWK6res_DEGenes)
-CvWK6DEGenes_filt <- CvWK6res_DEGenes[!CvWK6res_DEGenes %in% CvWK6nBvWK6genes]
-BvWK6DEGenes_filt <- BvWK6res_DEGenes[!BvWK6res_DEGenes %in% CvWK6nBvWK6genes]
-
-#Add annotation of where the genes plotted are coming from (will help in the heatmap breakdown)
-CvWK6 <- cbind(CvWK6DEGenes_filt, rep("CvWK6", length(CvWK6DEGenes_filt)))
-BvWK6 <- cbind(BvWK6DEGenes_filt, rep("BvWK6", length(BvWK6DEGenes_filt)))
-BvC <- cbind(BvCres_DEGenes, rep("BvC", length(BvCres_DEGenes)))
-
-CvWK6nBvWK6 <- cbind(CvWK6nBvWK6genes, rep("CvWK6 & BvWK6", length(CvWK6nBvWK6genes)))
-
-#Combine gene lists into one object for plotting
-Allgenes <- as.data.frame(rbind(CvWK6,BvWK6,BvC,CvWK6nBvWK6))
-colnames(Allgenes) <- c("Genes","Comparison")
-
-#plot
-Heatmap(t(apply(vstDat[Allgenes$Genes, rownames(dfAnnot)],1,scale)),top_annotation = HA,
-        clustering_distance_rows = 'pearson', 
-        clustering_distance_columns = 'pearson',
-        row_names_gp = gpar(fontsize = 3), column_title="All DE Genes across all paired samples retained in analysis",
-        row_split = Allgenes$Comparison, border = TRUE)
-```
-
-
+# Hallmark pathway analysis
 ## Baseline vs Entinostat Pathway Analysis
 
 Positive Normalized Enrichment Score = enriched in Entinostat samples.
 Negative Normalized Enrichment Score = enriched in Baseline samples.
 
-### HALLMARK statistics
 
 ```{r}
-#BvC
-datatable(BvCgsResults$HALLMARK)
-fwrite(as.data.frame(BvCgsResults$HALLMARK), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvC_HALLMARK.csv")
+# Get Pathways
+hallmark_df = msigdbr(species = "Homo sapiens", category = "H")
+hallmark_list = hallmark_df %>% split(x = .$gene_symbol, f = .$gs_name)
 
-## Complete HALLMARK Barplot
-BvCgsResults$HALLMARK$adjPvalue <- ifelse(BvCgsResults$HALLMARK$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvCgsResults$HALLMARK, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Hallmark pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
+# run fgsea
+  BaselinevC1D1gsResults <- as.data.frame(fgsea(pathways=hallmark_list, stats=BaselinevC1D1stats))
+#BaselinevC1D1
+datatable(BaselinevC1D1gsResults)
+fwrite(BaselinevC1D1gsResults, file=paste0(rootDir,"output_data/BaselinevC1D1_HALLMARK.csv"))
 
-## Sig Only HALLMARK Barplot
-Sig_CD4ResHALLMARK <- BvCgsResults$HALLMARK[padj < 0.05]
-if (nrow(Sig_CD4ResHALLMARK)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResHALLMARK, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) Hallmark pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
 ```
 
-### ONCOGENIC statistics
+## Baseline vs C2D1 Pathway Analysis
 
-```{r}
-#BvC
-datatable(BvCgsResults$ONCOGENIC)
-fwrite(as.data.frame(BvCgsResults$ONCOGENIC), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvC_ONCOGENIC.csv")
-
-## Complete ONCOGENIC Barplot
-BvCgsResults$ONCOGENIC$adjPvalue <- ifelse(BvCgsResults$ONCOGENIC$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvCgsResults$ONCOGENIC, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="ONCOGENIC pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only ONCOGENIC Barplot
-Sig_CD4ResONCOGENIC <- BvCgsResults$ONCOGENIC[padj < 0.05]
-if (nrow(Sig_CD4ResONCOGENIC)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResONCOGENIC, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) ONCOGENIC pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### IMMUNE statistics
-
-```{r}
-#BvC
-datatable(BvCgsResults$IMMUNE)
-fwrite(as.data.frame(BvCgsResults$IMMUNE), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvC_IMMUNE.csv")
-
-## Complete IMMUNE Barplot
-BvCgsResults$IMMUNE$adjPvalue <- ifelse(BvCgsResults$IMMUNE$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvCgsResults$IMMUNE, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="IMMUNE pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only IMMUNE Barplot
-Sig_CD4ResIMMUNE <- BvCgsResults$IMMUNE[padj < 0.05]
-if (nrow(Sig_CD4ResIMMUNE)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResIMMUNE, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) IMMUNE pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### KEGG statistics
-
-```{r}
-#BvC
-datatable(BvCgsResults$KEGG)
-fwrite(as.data.frame(BvCgsResults$KEGG), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvC_KEGG.csv")
-
-## Complete KEGG Barplot
-BvCgsResults$KEGG$adjPvalue <- ifelse(BvCgsResults$KEGG$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvCgsResults$KEGG, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="KEGG pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only KEGG Barplot
-Sig_CD4ResKEGG <- BvCgsResults$KEGG[padj < 0.05]
-if (nrow(Sig_CD4ResKEGG)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResKEGG, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) KEGG pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### REACTOME statistics
-
-```{r}
-#BvC
-datatable(BvCgsResults$REACTOME)
-fwrite(as.data.frame(BvCgsResults$REACTOME), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvC_REACTOME.csv")
-
-## Complete REACTOME Barplot
-BvCgsResults$REACTOME$adjPvalue <- ifelse(BvCgsResults$REACTOME$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvCgsResults$REACTOME, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="REACTOME pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only REACTOME Barplot
-Sig_CD4ResREACTOME <- BvCgsResults$REACTOME[padj < 0.05]
-if (nrow(Sig_CD4ResREACTOME)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResREACTOME, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) REACTOME pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### GOBP statistics
-
-```{r}
-#BvC
-datatable(BvCgsResults$GOBP)
-fwrite(as.data.frame(BvCgsResults$GOBP), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvC_GOBP.csv")
-
-## Complete GOBP Barplot
-BvCgsResults$GOBP$adjPvalue <- ifelse(BvCgsResults$GOBP$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvCgsResults$GOBP, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="GOBP pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only GOBP Barplot
-Sig_CD4ResGOBP <- BvCgsResults$GOBP[padj < 0.05]
-if (nrow(Sig_CD4ResGOBP)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResGOBP, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) GOBP pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### GOMF statistics
-
-```{r}
-#BvC
-datatable(BvCgsResults$GOMF)
-fwrite(as.data.frame(BvCgsResults$GOMF), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvC_GOMF.csv")
-
-## Complete GOMF Barplot
-BvCgsResults$GOMF$adjPvalue <- ifelse(BvCgsResults$GOMF$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvCgsResults$GOMF, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="GOMF pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only GOMF Barplot
-Sig_CD4ResGOMF <- BvCgsResults$GOMF[padj < 0.05]
-if (nrow(Sig_CD4ResGOMF)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResGOMF, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) GOMF pathways Enrichment Score from BvC in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-## Baseline vs WK6 Pathway Analysis
-
-Positive Normalized Enrichment Score = enriched in WK6 samples.
+Positive Normalized Enrichment Score = enriched in C2D1 samples.
 Negative Normalized Enrichment Score = enriched in Baseline samples.
 
-### HALLMARK statistics
-
 ```{r}
-#BvWK6
-datatable(BvWK6gsResults$HALLMARK)
-fwrite(as.data.frame(BvWK6gsResults$HALLMARK), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvWK6_HALLMARK.csv")
+  #Complete Pathway Analysis
+  BaselinevC2D1gsResults <- as.data.frame(fgsea(pathways=hallmark_list, stats=BaselinevC2D1stats))
+  
+#BaselinevC2D1
+datatable(BaselinevC2D1gsResults)
+fwrite(BaselinevC2D1gsResults, file=paste0(rootDir,"output_data/BaselinevC2D1_HALLMARK.csv"))
 
-## Complete HALLMARK Barplot
-BvWK6gsResults$HALLMARK$adjPvalue <- ifelse(BvWK6gsResults$HALLMARK$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvWK6gsResults$HALLMARK, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Hallmark pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only HALLMARK Barplot
-Sig_CD4ResHALLMARK <- BvWK6gsResults$HALLMARK[padj < 0.05]
-if (nrow(Sig_CD4ResHALLMARK)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResHALLMARK, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) Hallmark pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
 ```
 
-### ONCOGENIC statistics
+## Entinostat vs C2D1 Pathway Analysis
 
-```{r}
-#BvWK6
-datatable(BvWK6gsResults$ONCOGENIC)
-fwrite(as.data.frame(BvWK6gsResults$ONCOGENIC), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvWK6_ONCOGENIC.csv")
-
-## Complete ONCOGENIC Barplot
-BvWK6gsResults$ONCOGENIC$adjPvalue <- ifelse(BvWK6gsResults$ONCOGENIC$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvWK6gsResults$ONCOGENIC, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="ONCOGENIC pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only ONCOGENIC Barplot
-Sig_CD4ResONCOGENIC <- BvWK6gsResults$ONCOGENIC[padj < 0.05]
-if (nrow(Sig_CD4ResONCOGENIC)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResONCOGENIC, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) ONCOGENIC pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### IMMUNE statistics
-
-```{r}
-#BvWK6
-datatable(BvWK6gsResults$IMMUNE)
-fwrite(as.data.frame(BvWK6gsResults$IMMUNE), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvWK6_IMMUNE.csv")
-
-## Complete IMMUNE Barplot
-BvWK6gsResults$IMMUNE$adjPvalue <- ifelse(BvWK6gsResults$IMMUNE$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvWK6gsResults$IMMUNE, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="IMMUNE pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only IMMUNE Barplot
-Sig_CD4ResIMMUNE <- BvWK6gsResults$IMMUNE[padj < 0.05]
-if (nrow(Sig_CD4ResIMMUNE)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResIMMUNE, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) IMMUNE pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### KEGG statistics
-
-```{r}
-#BvWK6
-datatable(BvWK6gsResults$KEGG)
-fwrite(as.data.frame(BvWK6gsResults$KEGG), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvWK6_KEGG.csv")
-
-## Complete KEGG Barplot
-BvWK6gsResults$KEGG$adjPvalue <- ifelse(BvWK6gsResults$KEGG$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvWK6gsResults$KEGG, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="KEGG pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only KEGG Barplot
-Sig_CD4ResKEGG <- BvWK6gsResults$KEGG[padj < 0.05]
-if (nrow(Sig_CD4ResKEGG)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResKEGG, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) KEGG pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### REACTOME statistics
-
-```{r}
-#BvWK6
-datatable(BvWK6gsResults$REACTOME)
-fwrite(as.data.frame(BvWK6gsResults$REACTOME), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvWK6_REACTOME.csv")
-
-## Complete REACTOME Barplot
-BvWK6gsResults$REACTOME$adjPvalue <- ifelse(BvWK6gsResults$REACTOME$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvWK6gsResults$REACTOME, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="REACTOME pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only REACTOME Barplot
-Sig_CD4ResREACTOME <- BvWK6gsResults$REACTOME[padj < 0.05]
-if (nrow(Sig_CD4ResREACTOME)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResREACTOME, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) REACTOME pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### GOBP statistics
-
-```{r}
-#BvWK6
-datatable(BvWK6gsResults$GOBP)
-fwrite(as.data.frame(BvWK6gsResults$GOBP), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvWK6_GOBP.csv")
-
-## Complete GOBP Barplot
-BvWK6gsResults$GOBP$adjPvalue <- ifelse(BvWK6gsResults$GOBP$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvWK6gsResults$GOBP, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="GOBP pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only GOBP Barplot
-Sig_CD4ResGOBP <- BvWK6gsResults$GOBP[padj < 0.05]
-if (nrow(Sig_CD4ResGOBP)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResGOBP, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) GOBP pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### GOMF statistics
-
-```{r}
-#BvWK6
-datatable(BvWK6gsResults$GOMF)
-fwrite(as.data.frame(BvWK6gsResults$GOMF), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/BvWK6_GOMF.csv")
-
-## Complete GOMF Barplot
-BvWK6gsResults$GOMF$adjPvalue <- ifelse(BvWK6gsResults$GOMF$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(BvWK6gsResults$GOMF, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="GOMF pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only GOMF Barplot
-Sig_CD4ResGOMF <- BvWK6gsResults$GOMF[padj < 0.05]
-if (nrow(Sig_CD4ResGOMF)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResGOMF, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) GOMF pathways Enrichment Score from BvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-## Entinostat vs WK6 Pathway Analysis
-
-Positive Normalized Enrichment Score = enriched in WK6 samples.
+Positive Normalized Enrichment Score = enriched in C2D1 samples.
 Negative Normalized Enrichment Score = enriched in Entinostat samples.
 
 ### HALLMARK statistics
 
 ```{r}
-#CvWK6
-datatable(CvWK6gsResults$HALLMARK)
-fwrite(as.data.frame(CvWK6gsResults$HALLMARK), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/CvWK6_HALLMARK.csv")
+C1D1vC2D1gsResults <- as.data.frame(fgsea(pathways=hallmark_list, stats=C1D1vC2D1stats))
+    
+#C1D1vC2D1
+datatable(C1D1vC2D1gsResults)
+fwrite(C1D1vC2D1gsResults, file=paste0(rootDir,"output_data/C1D1vC2D1_HALLMARK.csv"))
 
-## Complete HALLMARK Barplot
-CvWK6gsResults$HALLMARK$adjPvalue <- ifelse(CvWK6gsResults$HALLMARK$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(CvWK6gsResults$HALLMARK, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Hallmark pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only HALLMARK Barplot
-Sig_CD4ResHALLMARK <- CvWK6gsResults$HALLMARK[padj < 0.05]
-if (nrow(Sig_CD4ResHALLMARK)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResHALLMARK, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) Hallmark pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
 ```
 
-### ONCOGENIC statistics
+## HALLMARK Pathways Figure
+Create a dotplot with GSEA results for different comparisons. Plot significant pathways only (adjusted p-values < 0.05). Color is the normalized enrichment score. Red/blue means higher/lower expression on the second time point.
+
 
 ```{r}
-#CvWK6
-datatable(CvWK6gsResults$ONCOGENIC)
-fwrite(as.data.frame(CvWK6gsResults$ONCOGENIC), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/CvWK6_ONCOGENIC.csv")
+# merge pathwyay analysis results
+  pathRes = rbind(cbind(comparison = rep("Baseline_vs_C1D1",nrow(BaselinevC1D1gsResults)),BaselinevC1D1gsResults),
+  cbind(comparison = rep("Baseline_vs_C2D1",nrow(BaselinevC2D1gsResults)),BaselinevC2D1gsResults),
+  cbind(comparison = rep("C1D1_vs_C2D1",nrow(C1D1vC2D1gsResults)),C1D1vC2D1gsResults))
 
-## Complete ONCOGENIC Barplot
-CvWK6gsResults$ONCOGENIC$adjPvalue <- ifelse(CvWK6gsResults$ONCOGENIC$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(CvWK6gsResults$ONCOGENIC, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="ONCOGENIC pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
+ # make NES for not sugnificant pathways as NA
+  pathRes_ns = pathRes %>% mutate(NES, NES = ifelse(padj >0.05, NA, NES))
+  
+  # plot: dot plot
+  p = ggplot(data = pathRes_ns %>% filter(!is.na(NES)), aes(x = comparison, y = pathway, color = NES)) + 
+    geom_point(size = 4) +
+  #  scale_color_gradient(low = "red", high = "blue") +
+    scale_colour_gradient2(low = "blue", high = "red") +
+    scale_x_discrete(labels = c("Baseline vs C1D1", "Baseline vs C2D1","C1D1 vs C2D1")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
-## Sig Only ONCOGENIC Barplot
-Sig_CD4ResONCOGENIC <- CvWK6gsResults$ONCOGENIC[padj < 0.05]
-if (nrow(Sig_CD4ResONCOGENIC)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResONCOGENIC, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) ONCOGENIC pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
+  print(p)
+
+
 ```
-
-### IMMUNE statistics
-
-```{r}
-#CvWK6
-datatable(CvWK6gsResults$IMMUNE)
-fwrite(as.data.frame(CvWK6gsResults$IMMUNE), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/CvWK6_IMMUNE.csv")
-
-## Complete IMMUNE Barplot
-CvWK6gsResults$IMMUNE$adjPvalue <- ifelse(CvWK6gsResults$IMMUNE$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(CvWK6gsResults$IMMUNE, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="IMMUNE pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only IMMUNE Barplot
-Sig_CD4ResIMMUNE <- CvWK6gsResults$IMMUNE[padj < 0.05]
-if (nrow(Sig_CD4ResIMMUNE)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResIMMUNE, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) IMMUNE pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### KEGG statistics
-
-```{r}
-#CvWK6
-datatable(CvWK6gsResults$KEGG)
-fwrite(as.data.frame(CvWK6gsResults$KEGG), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/CvWK6_KEGG.csv")
-
-## Complete KEGG Barplot
-CvWK6gsResults$KEGG$adjPvalue <- ifelse(CvWK6gsResults$KEGG$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(CvWK6gsResults$KEGG, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="KEGG pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only KEGG Barplot
-Sig_CD4ResKEGG <- CvWK6gsResults$KEGG[padj < 0.05]
-if (nrow(Sig_CD4ResKEGG)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResKEGG, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) KEGG pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### REACTOME statistics
-
-```{r}
-#CvWK6
-datatable(CvWK6gsResults$REACTOME)
-fwrite(as.data.frame(CvWK6gsResults$REACTOME), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/CvWK6_REACTOME.csv")
-
-## Complete REACTOME Barplot
-CvWK6gsResults$REACTOME$adjPvalue <- ifelse(CvWK6gsResults$REACTOME$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(CvWK6gsResults$REACTOME, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="REACTOME pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only REACTOME Barplot
-Sig_CD4ResREACTOME <- CvWK6gsResults$REACTOME[padj < 0.05]
-if (nrow(Sig_CD4ResREACTOME)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResREACTOME, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) REACTOME pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### GOBP statistics
-
-```{r}
-#CvWK6
-datatable(CvWK6gsResults$GOBP)
-fwrite(as.data.frame(CvWK6gsResults$GOBP), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/CvWK6_GOBP.csv")
-
-## Complete GOBP Barplot
-CvWK6gsResults$GOBP$adjPvalue <- ifelse(CvWK6gsResults$GOBP$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(CvWK6gsResults$GOBP, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="GOBP pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only GOBP Barplot
-Sig_CD4ResGOBP <- CvWK6gsResults$GOBP[padj < 0.05]
-if (nrow(Sig_CD4ResGOBP)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResGOBP, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) GOBP pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-### GOMF statistics
-
-```{r}
-#CvWK6
-datatable(CvWK6gsResults$GOMF)
-fwrite(as.data.frame(CvWK6gsResults$GOMF), file="~/OneDrive - Johns Hopkins/J1798/Results/Paired_Model/Pathway/CvWK6_GOMF.csv")
-
-## Complete GOMF Barplot
-CvWK6gsResults$GOMF$adjPvalue <- ifelse(CvWK6gsResults$GOMF$padj <= 0.05, "significant", "non-significant")
-cols <- c("non-significant" = "grey", "significant" = "red")
-ggplot(CvWK6gsResults$GOMF, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="GOMF pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-
-## Sig Only GOMF Barplot
-Sig_CD4ResGOMF <- CvWK6gsResults$GOMF[padj < 0.05]
-if (nrow(Sig_CD4ResGOMF)==0){ print("No Significant pathways with pAdj < 0.05"
-)} else {
-  ggplot(Sig_CD4ResGOMF, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
-  geom_col() +
-  scale_fill_manual(values = cols) +
-  theme(axis.text.y = element_text(size=5)) +
-  coord_flip() +
-  labs(x="Pathway", y="Normalized Enrichment Score",
-  title="Significant (pAdj<0.05) GOMF pathways Enrichment Score from CvWK6 in Paired Samples") + theme(plot.title.position = "plot", plot.title = element_text(size=8, face="bold"))
-}
-```
-
-# Evaluation of HDACi genes from Dr. Azad
-
-Here, we explore the gene expression of HDACi genes from Dr. Azad. Genes were selected from "An Inactivating Mutation in HDAC2 Leads to Dysregulation of Apoptosis Mediated by APAF1"(https://pubmed.ncbi.nlm.nih.gov/18834886/)
-
-Genes Selected: P21(CDKN1A), P27(CDKN1B), APAF1, Caspase-3(CASP3), NOXA(PMAIP1), BIM(BCL2L11), PUMA(BBC3)
-
-```{r}
-HDAC_genes <- c("CDKN1A","CDKN1B","APAF1","CASP3","PMAIP1","BCL2L11","BBC3")
-
-##Heatmap of these genes across paired samples
-dfAnnot = data.frame(Treatment=sampAnnotPaired[,'Bx Timepoint'],
-                     RECIST=sampAnnotPaired[,'RECIST'],
-                     CBR=sampAnnotPaired[,'CBR'],
-                     Tumor_Percent=sampAnnotPaired[,"Tumor_Percentage"],
-                     Monocyte_Cibersort=sampAnnotPaired[,"Monocytes"], row.names = rownames(sampAnnotPaired))
-
-HA <- HeatmapAnnotation(df = dfAnnot,
-                        col=list(Arm =
-                                   c('Baseline'='blue',
-                                     'C1D1' = 'red',
-                                     'WK6'='yellow')))
-
-Heatmap(t(apply(vstDat[HDAC_genes, rownames(dfAnnot)],1,scale)),top_annotation = HA,
-        clustering_distance_rows = 'pearson', 
-        clustering_distance_columns = 'pearson',
-        row_names_gp = gpar(fontsize = 6), column_title="HDAC Genes")
-
-##Boxplots of these genes w/ paired samples
-sampAnnotPaired_HDACi <- sampAnnotPaired
-sampAnnotPaired_HDACi$CDKN1A <- vstDat["CDKN1A",]
-sampAnnotPaired_HDACi$CDKN1B <- vstDat["CDKN1B",]
-sampAnnotPaired_HDACi$APAF1 <- vstDat["APAF1",]
-sampAnnotPaired_HDACi$CASP3 <- vstDat["CASP3",]
-sampAnnotPaired_HDACi$PMAIP1 <- vstDat["PMAIP1",]
-sampAnnotPaired_HDACi$BCL2L11 <- vstDat["BCL2L11",]
-sampAnnotPaired_HDACi$BBC3 <- vstDat["BBC3",]
-
-for (i in HDAC_genes){
-  print(ggplot(sampAnnotPaired_HDACi, aes(x=`Bx Timepoint`, y=get(i))) + geom_boxplot() + ylab(paste0("VST Counts of ",i)) + geom_point() + geom_line(aes(group=SampleID, col=RECIST)))
-}
-```
-

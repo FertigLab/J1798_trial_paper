@@ -29,9 +29,9 @@ library(kableExtra)
 
 
 # set root folder
-rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+rootDir = "../"
 
-source(paste0(rootDir,"Scripts/parameters_and_functions.r"))
+source(paste0(rootDir,"parameters_and_functions.r"))
 
 ```
 Create figures for CyTOF lymphoid panel data. Initial analysis was done by Won
@@ -43,8 +43,8 @@ Create figures for CyTOF lymphoid panel data. Initial analysis was done by Won
 ```{r echo=FALSE}
 
 #=========================
-# read in sample annotation and mapping
-patTab = read.csv(file = paste0(rootDir,"for_paper/table_patients.csv"), row.names = 1)
+# read in patient annotation and mapping
+patTab = read.csv(file = paste0(rootDir,"input_data/table_patients.csv"), row.names = 1)
 # switch to R/NR annotation
 patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
 
