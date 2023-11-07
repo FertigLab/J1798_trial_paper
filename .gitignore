@@ -1,0 +1,8 @@
+
+output_data/Baseline_vs_C1D1_TopDE.csv
+output_data/Baseline_vs_C2D1_TopDE.csv
+output_data/BaselinevC1D1_HALLMARK.csv
+output_data/BaselinevC2D1_HALLMARK.csv
+output_data/C1D1_vs_C2D1_TopDE.csv
+output_data/C1D1vC2D1_HALLMARK.csv
+Rmd/RNAseq_PairedModel.html
