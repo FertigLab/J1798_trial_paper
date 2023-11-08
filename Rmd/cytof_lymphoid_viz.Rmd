@@ -30,11 +30,11 @@ library(kableExtra)
 
 # set root folder
 rootDir = "../"
-
+# load shared parameters and functions
 source(paste0(rootDir,"parameters_and_functions.r"))
 
 ```
-Create figures for CyTOF lymphoid panel data. Initial analysis was done by Won
+Create figures for CyTOF lymphoid panel data. Preprocessing and preliminary analysis were done by Won Jin Ho.
 
 # Cell proportions
 
@@ -50,7 +50,7 @@ patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonRe
 
 #=============================
 # read in proportions
-props = read.csv(file = paste0(rootDir,"for_paper/table_cytof_lymphoid_props.csv"), row.names = 1)
+props = read.csv(file = paste0(rootDir,"input_data/table_cytof_lymphoid_props.csv"), row.names = 1)
 
 # transpose, extract time point and add response
 props = t(props)
@@ -95,7 +95,7 @@ P-values from paired two-sided Wilcoxon test between time points and mean of dif
 res = t(sapply(as.character(clusters), pairedWilcox, props))
 
 res = round(res,3)
-write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/Cytof/table_cytof_lymphoid_wilcox_pvalues_proportions.csv"))
+write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"output_data/table_cytof_lymphoid_wilcox_pvalues_proportions.csv"))
 
 knitr::kable(res, "simple",digits = 3)
 # significant proportions

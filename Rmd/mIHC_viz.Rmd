@@ -28,26 +28,27 @@ library(pals)
 library(kableExtra)
 
 # set root folder
-rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+rootDir = "../"
 
-source(paste0(rootDir,"Scripts/parameters_and_functions.r"))
+# load shared parameters and functions
+source(paste0(rootDir,"parameters_and_functions.r"))
 
 #=========================
 # read in sample annotation and mapping
-patTab = read.csv(file = paste0(rootDir,"for_paper/table_patients.csv"), row.names = 1)
+patTab = read.csv(file = paste0(rootDir,"input_data/table_patients.csv"), row.names = 1)
 # switch to R/NR annotation
 patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
 
 
 ```
-Create figures for mIHC data. Initial analysis was done by collaborator in OHSU
+Create figures for mIHC data. Preprocessing and preliminary analysis were done by Courtney B. Betts
 
 # Cell densities
 
 ```{r echo=FALSE}
 #=============================
 # read in densities
-dens = read.csv(file = paste0(rootDir,"for_paper/table_mIHC_cell_densities.csv"), row.names = 1)
+dens = read.csv(file = paste0(rootDir,"input_data/table_mIHC_cell_densities.csv"), row.names = 1)
 
 cellTypes = rownames(dens)
 
@@ -84,13 +85,6 @@ macrophages = c("CD163- macrophages", "CD163+ macrophages")
 # cluster colors
 clustercolors <- toupper(as.character(c(cols25(n=25),alphabet(n=19)))[1:length(immuneCells)])
 names(clustercolors) <- levels(immuneCells)
-# Stacked bar plot
-# df_melt = melt(dens, id.vars = c("patientID", "timepoint"), measure.vars = immuneCells)
-# print(ggplot(df_melt, aes(fill=factor(variable, levels = immuneCells_labels$levels, labels = immuneCells_labels$labels), y=as.numeric(value), x=timepoint)) + 
-#     geom_bar(position="stack", stat="identity")+
-#       scale_fill_manual("Cell type", values=clustercolors)+
-#       ylab("Cell densities") + xlab("Time point"))
-
 # make barplot with average by time point
 # immune cells
 d = dens %>% filter(timepoint != "C2D1") 
@@ -127,7 +121,7 @@ P-values from paired two-sided Wilcoxon test between time points and mean of dif
 res = t(sapply(as.character(cellTypes), pairedWilcox, dens))
 
 res = round(res,3)
-write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/mIHC/table_mIHC_wilcox_pvalues_densities.csv"))
+write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"output_data/table_mIHC_wilcox_pvalues_densities.csv"))
 
 datatable(res)
 # significant proportions
@@ -150,9 +144,6 @@ for(i in macrophages)
     p1 = ggpaired(df, x="timepoint",y="cell", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
      title = i, xlab="Time point", ylab = "Cell proportions") +
        theme(legend.position="right") +
-#      scale_y_continuous(trans = "log10", labels = comma)+
-  # stat_compare_means()+
-  #    stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3])), method = "wilcox.test", paired = T)+
       scale_x_discrete(labels=timeLab)
  
      # two time points
@@ -171,12 +162,11 @@ for(i in macrophages)
 ```
 
 # Ratios
-### Precalculated ratios from OHSU
 
 ```{r ratios, echo=FALSE, fig.width= 4, fig.height= 3 }
 #===============
 # read in pre-calculated ratios (from OHSU)
-r = read.csv(file = paste0(rootDir,"for_paper/table_mIHC_ratios.csv"), row.names = 1)
+r = read.csv(file = paste0(rootDir,"input_data/table_mIHC_ratios.csv"), row.names = 1)
 
 ratios = rownames(r)
 
@@ -225,7 +215,7 @@ of cell expressing a functional marker in a specific cell type
 ```{r, echo=FALSE, fig.width= 4, fig.height= 3 }
 #=============================
 # read in percentages
-perc = read.csv(file = paste0(rootDir,"for_paper/table_mIHC_percentages.csv"))
+perc = read.csv(file = paste0(rootDir,"input_data/table_mIHC_percentages.csv"))
 
 markers = paste(perc$marker,perc$cell_type, sep = " in ")
 rownames(perc) = markers
@@ -249,7 +239,7 @@ perc = perc %>% filter(timepoint != "PD")
 res = t(sapply(markers, pairedWilcox, perc))
 
 res = round(res,3)
- write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/mIHC/table_mIHC_wilcox_pvalues_percentage.csv"))
+ write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"output_data/table_mIHC_wilcox_pvalues_percentage.csv"))
  
 datatable(res)
 
@@ -283,48 +273,6 @@ df = cbind(percent = as.numeric(perc[,i]), perc[,c("patientID", "timepoint", "RE
 }
 
 ```
-
-
-```{r, echo=FALSE, fig.width= 4, fig.height= 3, eval=FALSE}
-
-#===========
-### Ratio of mature/immature DCs
-#"DC-LAMP+ DCs"/"DC-LAMP- DCs"???
-# ratio calculated from densities
-df = cbind(ratio = dens[,14]/dens[,15], dens[,c("patientID", "timepoint", "RECIST") ] )
-#print(i)
-     # two time points
-    df = df %>% filter(timepoint != "C2D1")  
-
-    ggpaired(df, x="timepoint",y="ratio", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
-     title = "(from densities)", xlab="Time point", ylab = "Ratio of mature/immature DCs") +
-       theme(legend.position="right") +
-  stat_compare_means()+
-      scale_x_discrete(labels=timeLab)
-
-```
-
-
-```{r, echo=FALSE, fig.width= 4, fig.height= 3, eval=FALSE}
-#===========
-### Ratio of mature/immature DCs
-#calculated from percentages
-# ratio calculated from percentages
-df = cbind(ratio = as.numeric(perc[,56])/as.numeric(perc[,57]), perc[,c("patientID", "timepoint", "RECIST") ] )
-#print(i)
-     # two time points
-    df = df %>% filter(timepoint != "C2D1")  
-
-    ggpaired(df, x="timepoint",y="ratio", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
-     title = "(from percentage)", xlab="Time point", ylab = "Ratio of mature/immature DCs") +
-       theme(legend.position="right") +
-  stat_compare_means()+
-      scale_x_discrete(labels=timeLab)
-
-
-
-```
-
 
 ```{r echo=FALSE}
 sessionInfo()

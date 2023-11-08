@@ -40,12 +40,13 @@ set.seed(1234)
 # set root folder
 rootDir = "../"
 
+# load shared parameters and functions
 source(paste0(rootDir,"parameters_and_functions.r"))
 
 ```
 
 
-## Expression counts data
+# Load expression data
 
 ```{r}
 
@@ -56,7 +57,7 @@ dim(exprsDat)
 ```
 
 
-## Sample Annotations
+# Sample Annotations and counts
 
 ```{r}
 #=========================
@@ -64,6 +65,8 @@ dim(exprsDat)
 patTab = read.csv(file = paste0(rootDir,"input_data/table_patients.csv"), row.names = 1)
 # switch to R/NR annotation
 patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
+
+datatable(patTab)
 
 # sample annotation
 sampAnnot = data.frame(
@@ -138,9 +141,9 @@ exprsDatPaired <- exprsDat[,rownames(sampAnnotPaired)]
 ```
 
 
-# Differential expression and gene set analyses by Time (Treatment)
+# Paired differential expression analysis by Time (Treatment)
 
-For the retained samples, we run differential expression analysis across time with [DESeq2](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8), including Tissue as a covariate in our model. Estimated fold changes are shrunk with `ashr` using `lfcShrink` to account for the variation in the samples in this dataset. Gene set statistics are run with [fgsea](https://www.biorxiv.org/content/10.1101/060012v3) with Hallmark pathways from [MSigDb](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3106198/) v7.5.1.
+For the retained samples, we run differential expression analysis across time with [DESeq2](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8). Estimated fold changes are shrunk with `ashr` using `lfcShrink` to account for the variation in the samples in this dataset. 
 
 ```{r}
 
@@ -209,13 +212,11 @@ BaselinevC1D1dds <- DESeqDataSetFromMatrix(
   
 ```
 
-## Paired DE Results
+For each comparison, a datatable of results and volcanoplot will be provided. Plotted on the y-axis is the adjusted p-value, on the x-axis is the Log2 Fold Change.
 
-For each comparison, a datatable of results and volcanoplot will be provided. Plotted on the y-axis is the p-value (unadjusted), on the x-axis is the Log2 Fold Change.
+## Baseline vs C1D1 DE 
 
-### BaselinevC1D1 DE Plots
-
-Positive Log2 Fold Change = enriched in Entinostat samples.
+Positive Log2 Fold Change = enriched in C1D1 samples.
 Negative Log2 Fold Change = enriched in Baseline samples.
 
 Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj < 0.05
@@ -223,20 +224,24 @@ Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj
 ```{r}
 ##BaselinevC1D1
 datatable(data.frame(BaselinevC1D1res))
+#volcano plot
 EnhancedVolcano(BaselinevC1D1res, lab=row.names(BaselinevC1D1res), 
                 x='log2FoldChange', y='padj', FCcutoff = 0.5,
                 pCutoff = 0.05, title = "Paired DE Results by Time -- BaselinevC1D1")
 
+# significantly DE genes
 BaselinevC1D1res_TopDE <- BaselinevC1D1res[BaselinevC1D1res$padj < 0.05 &
                               abs(BaselinevC1D1res$log2FoldChange) > 0.5,]
+#order by logFC
+BaselinevC1D1res_TopDE = BaselinevC1D1res_TopDE[order(BaselinevC1D1res_TopDE$log2FoldChange, decreasing = T),]
 
 write.csv(BaselinevC1D1res_TopDE, paste0(rootDir,"output_data/Baseline_vs_C1D1_TopDE.csv"))
 
 ```
 
-### BaselinevC2D1 DE Plots
+## Baseline vs C2D1 DE 
 
-Positive Log2 Fold Change = enriched in Week 6 samples.
+Positive Log2 Fold Change = enriched in C2D1 samples.
 Negative Log2 Fold Change = enriched in Baseline samples.
 
 Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj < 0.05
@@ -244,42 +249,53 @@ Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj
 ```{r}
 ##BaselinevC2D1
 datatable(data.frame(BaselinevC2D1res))
+# volcano
 EnhancedVolcano(BaselinevC2D1res, lab=row.names(BaselinevC2D1res), 
                 x='log2FoldChange', y='padj', FCcutoff = 0.5,
                 pCutoff = 0.05, title = "Paired DE Results by Time -- BaselinevC2D1")
 
+# significantly DE genes
 BaselinevC2D1res_TopDE <- BaselinevC2D1res[BaselinevC2D1res$padj < 0.05 &
                               abs(BaselinevC2D1res$log2FoldChange) > 0.5,]
+#order by logFC
+BaselinevC2D1res_TopDE = BaselinevC2D1res_TopDE[order(BaselinevC2D1res_TopDE$log2FoldChange, decreasing = T),]
 
 write.csv(BaselinevC2D1res_TopDE, paste0(rootDir,"output_data/Baseline_vs_C2D1_TopDE.csv"))
 
 ```
 
-### C1D1vC2D1 DE Plots
+## C1D1 vs C2D1 DE 
 
-Positive Log2 Fold Change = enriched in Week 6 samples.
-Negative Log2 Fold Change = enriched in Entinostat samples.
+Positive Log2 Fold Change = enriched in C2D1 samples.
+Negative Log2 Fold Change = enriched in C1D1 samples.
 
 Saved are going to be the genes with an absolute Log2FoldChange > 0.5 and a Padj < 0.05
 
 ```{r}
 ##C1D1vC2D1
 datatable(data.frame(C1D1vC2D1res))
+# volcano plot
 EnhancedVolcano(C1D1vC2D1res, lab=row.names(C1D1vC2D1res), 
                 x='log2FoldChange', y='padj', FCcutoff = 0.5,
                 pCutoffCol = 'padj', pCutoff = 0.05, title = "Paired DE Results by Time -- C1D1vC2D1")
 
+# significantly DE genes
 C1D1vC2D1res_TopDE <- C1D1vC2D1res[C1D1vC2D1res$padj < 0.05 &
                               abs(C1D1vC2D1res$log2FoldChange) > 0.5,]
+#order by logFC
+C1D1vC2D1res_TopDE = C1D1vC2D1res_TopDE[order(C1D1vC2D1res_TopDE$log2FoldChange, decreasing = T),]
 
 write.csv(C1D1vC2D1res_TopDE, paste0(rootDir,"output_data/C1D1_vs_C2D1_TopDE.csv"))
 
 ```
 
 # Hallmark pathway analysis
-## Baseline vs Entinostat Pathway Analysis
 
-Positive Normalized Enrichment Score = enriched in Entinostat samples.
+Gene set statistics are run with [fgsea](https://www.biorxiv.org/content/10.1101/060012v3) with Hallmark pathways from [MSigDb](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3106198/).
+
+## Baseline vs C1D1 
+
+Positive Normalized Enrichment Score = enriched in C1D1 samples.
 Negative Normalized Enrichment Score = enriched in Baseline samples.
 
 
@@ -296,7 +312,7 @@ fwrite(BaselinevC1D1gsResults, file=paste0(rootDir,"output_data/BaselinevC1D1_HA
 
 ```
 
-## Baseline vs C2D1 Pathway Analysis
+## Baseline vs C2D1 
 
 Positive Normalized Enrichment Score = enriched in C2D1 samples.
 Negative Normalized Enrichment Score = enriched in Baseline samples.
@@ -311,12 +327,10 @@ fwrite(BaselinevC2D1gsResults, file=paste0(rootDir,"output_data/BaselinevC2D1_HA
 
 ```
 
-## Entinostat vs C2D1 Pathway Analysis
+## C1D1 vs C2D1 
 
 Positive Normalized Enrichment Score = enriched in C2D1 samples.
-Negative Normalized Enrichment Score = enriched in Entinostat samples.
-
-### HALLMARK statistics
+Negative Normalized Enrichment Score = enriched in C1D1 samples.
 
 ```{r}
 C1D1vC2D1gsResults <- as.data.frame(fgsea(pathways=hallmark_list, stats=C1D1vC2D1stats))
@@ -327,12 +341,12 @@ fwrite(C1D1vC2D1gsResults, file=paste0(rootDir,"output_data/C1D1vC2D1_HALLMARK.c
 
 ```
 
-## HALLMARK Pathways Figure
+## HALLMARK Pathway Dotplot
 Create a dotplot with GSEA results for different comparisons. Plot significant pathways only (adjusted p-values < 0.05). Color is the normalized enrichment score. Red/blue means higher/lower expression on the second time point.
 
 
 ```{r}
-# merge pathwyay analysis results
+# merge pathwyay analysis results for plotting
   pathRes = rbind(cbind(comparison = rep("Baseline_vs_C1D1",nrow(BaselinevC1D1gsResults)),BaselinevC1D1gsResults),
   cbind(comparison = rep("Baseline_vs_C2D1",nrow(BaselinevC2D1gsResults)),BaselinevC2D1gsResults),
   cbind(comparison = rep("C1D1_vs_C2D1",nrow(C1D1vC2D1gsResults)),C1D1vC2D1gsResults))

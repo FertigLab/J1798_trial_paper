@@ -27,11 +27,11 @@ library(pheatmap)
 library(pals)
 library(kableExtra)
 
-
 # set root folder
-rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+rootDir = "../"
 
-source(paste0(rootDir,"Scripts/parameters_and_functions.r"))
+# load shared parameters and functions
+source(paste0(rootDir,"parameters_and_functions.r"))
 
 ```
 Create figures for cytokine data. 
@@ -42,19 +42,19 @@ Create figures for cytokine data.
 
 #=========================
 # read in sample annotation and mapping
-patTab = read.csv(file = paste0(rootDir,"for_paper/table_patients.csv"), row.names = 1)
+patTab = read.csv(file = paste0(rootDir,"input_data/table_patients.csv"), row.names = 1)
 # switch to R/NR annotation
 patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
 
 
 #==
-panel = read.csv(file = paste0(rootDir,"for_paper/table_cytokine_panel.csv"), row.names = 1)
+panel = read.csv(file = paste0(rootDir,"input_data/table_cytokine_panel.csv"), row.names = 1)
 
 cytokines = cbind(cytokines = rownames(panel), panel)
 
 #==
 # read cytokine values
-dat = read.csv(file = paste0(rootDir,"for_paper/table_cytokine_values.csv"), check.names = F)
+dat = read.csv(file = paste0(rootDir,"input_data/table_cytokine_values.csv"), check.names = F)
 
 table(dat$timePoint)
 
@@ -78,7 +78,7 @@ P-values from paired two-sided Wilcoxon test between time points and mean of dif
 res = t(sapply(as.character(cytokines[,"cytokines"]), pairedWilcox, dat))
 
 res = round(res,3)
-write.csv(cbind(cytokine = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/Cytokines/table_cytokine_wilcox_pvalues.csv"))
+write.csv(cbind(cytokine = rownames(res),res), row.names = F, file = paste0(rootDir,"output_data/table_cytokine_wilcox_pvalues.csv"))
 
 datatable(res)
 # significant proportions

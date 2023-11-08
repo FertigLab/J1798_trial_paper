@@ -28,12 +28,13 @@ library(pals)
 library(kableExtra)
 
 # set root folder
-rootDir = "C:/Users/Luda/OneDrive - Johns Hopkins/J1798/"
+rootDir = "../"
 
-source(paste0(rootDir,"Scripts/parameters_and_functions.r"))
+# load shared parameters and functions
+source(paste0(rootDir,"parameters_and_functions.r"))
 
 ```
-Create figures for CyTOF myeloid panel data. Initial analysis was done by Dimitri.
+Create figures for CyTOF myeloid panel data. Preprocessing and preliminary analysis were done by Dimitrios N. Sidiropoulos.
 
 # Cell proportions
 
@@ -43,13 +44,13 @@ Create figures for CyTOF myeloid panel data. Initial analysis was done by Dimitr
 
 #=========================
 # read in sample annotation and mapping
-patTab = read.csv(file = paste0(rootDir,"for_paper/table_patients.csv"), row.names = 1)
+patTab = read.csv(file = paste0(rootDir,"input_data/table_patients.csv"), row.names = 1)
 # switch to R/NR annotation
 patTab = patTab %>% mutate(RECIST = factor(RECIST,levels = c("Responder", "NonResponder"), labels = c("R","NR")))
 
 #=============================
 # read in proportions
-props = read.csv(file = paste0(rootDir,"for_paper/table_cytof_myeloid_props.csv"), row.names = 1)
+props = read.csv(file = paste0(rootDir,"input_data/table_cytof_myeloid_props.csv"), row.names = 1)
 
 # transpose, extract time point and add response
 props = t(props)
@@ -85,39 +86,10 @@ P-values from paired two-sided Wilcoxon test between time points and mean of dif
 ```{r table, echo=FALSE}
 # paired Wilcoxon
 
-# paired Wilcoxon test
-# k is a column in dat
-pairedWilcox = function(k, dat)
-{
-        mat <- data.frame(matrix(nrow = length(unique(dat$patientID)),
-      ncol = 3, dimnames = list(unique(dat$patientID),
-                      levels(factor(dat$timepoint)))), check.names = F)
-    for(i in levels(factor(dat$timepoint)))
-    {
-      d1 = dat %>% filter(timepoint == i)
-      mat[d1$patientID, i] = d1[,k]
-    }
-      
-    # running paired test
-    # Baseline vs C1D1
-    p1 = wilcox.test(mat[,1], mat[,2], paired = T)$p.value
-    #  C1D1 vs  C2D1
-    p2 = wilcox.test(mat[,2], mat[,3], paired = T)$p.value
-    #  Baseline vs  C2D1
-    p3 = wilcox.test(mat[,1], mat[,3], paired = T)$p.value
-   
-    # mean of delta between time points
-    d1 = mean(mat[,2] -  mat[,1], na.rm = T)
-    d2 = mean(mat[,3] -  mat[,2], na.rm = T)
-    d3 = mean(mat[,3] -  mat[,1], na.rm = T)
-   
-
-    return(c(pValue_BvsC1D1 = p1, 'mean(C1D1-B)' = d1, pValue_C1D1vsC2D2 = p2, 'mean(C2D2-C1D1)' = d2, pValue_BvsC2D2 = p3,'mean(C2D1-B)' = d3))
-}
 res = t(sapply(as.character(clusters), pairedWilcox, props))
 
 res = round(res,3)
-write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"Results/Cytof/table_cytof_myeloid_wilcox_pvalues_proportions.csv"))
+write.csv(cbind(cluster = rownames(res),res), row.names = F, file = paste0(rootDir,"output_data/table_cytof_myeloid_wilcox_pvalues_proportions.csv"))
 
 knitr::kable(res, "simple",digits = 3)
 # significant proportions
@@ -141,8 +113,6 @@ for(i in sigClusters)
     print(ggpaired(df , x="timepoint",y="cluster", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
      title = i, xlab="Time point", ylab = "Cell proportions") +
        theme(legend.position="right") +
-#      scale_y_continuous(trans = "log10", labels = comma)+
-#      stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3]))), method = "wilcox.test", paired = T)+
       scale_x_discrete(labels=timeLab))
       
 }
@@ -156,7 +126,7 @@ for(i in sigClusters)
 
 ```{r echo=FALSE, fig.width= 4, fig.height= 3 }
 # read in expression
-expr = read.csv(file = paste0(rootDir,"for_paper/table_cytof_myeloid_marker_expression.csv"))
+expr = read.csv(file = paste0(rootDir,"input_data/table_cytof_myeloid_marker_expression.csv"))
 
 # for every cluster run paired wilcoxon between time points for marker expression
 markers = colnames(expr)[4:ncol(expr)]
@@ -173,7 +143,7 @@ for(i in clusters)
   
 }
 
-write.csv(res1, row.names = F, file = paste0(rootDir,"Results/Cytof/table_cytof_myeloid_wilcox_pvalues_marker_expression.csv"))
+write.csv(res1, row.names = F, file = paste0(rootDir,"output_data/table_cytof_myeloid_wilcox_pvalues_marker_expression.csv"))
 
 datatable(res1)
 
@@ -204,8 +174,6 @@ for(i in 1:nrow(sigMarkers))
     print(ggpaired(df , x="timepoint",y="protein", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
      title = paste0(m," in ", k), xlab="Time point", ylab = "Marker Expression") +
        theme(legend.position="right") +
-#      scale_y_continuous(trans = "log10", labels = comma)+
-#      stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3]))), method = "wilcox.test", paired = T)+
       scale_x_discrete(labels=timeLab[1:2]))
       
 }
@@ -235,8 +203,6 @@ for(i in 1:nrow(sigMarkers))
       print(ggpaired(df , x="timepoint",y="protein", id = "patientID", line.size = .7, line.color = "RECIST",palette =  recistCol,
      title = paste0(m," in ", k), xlab="Time point", ylab = "Marker Expression") +
        theme(legend.position="right") +
-#      scale_y_continuous(trans = "log10", labels = comma)+
-#      stat_compare_means(comparisons = list(c(timeLab[1],timeLab[2]), c(timeLab[1],timeLab[3]), c(timeLab[2],timeLab[3]))), method = "wilcox.test", paired = T)+
       scale_x_discrete(labels=timeLab))
       
 }
