@@ -66,6 +66,8 @@ table(dens$timepoint)
 # exclude PD from the analysis
 dens = dens %>% filter(timepoint != "PD")
 
+# find pairs
+printPairs(dens)
 
 ```
 

@@ -61,6 +61,9 @@ table(dat$timePoint)
 # fix colnames
 dat = dat %>% mutate(patientID = `Publication  ID`, timepoint = timePoint, RECIST = patTab[`Publication  ID`,"RECIST"])
 
+# find pairs
+printPairs(dat)
+
 ord = order(dat$timePoint, dat$RECIST)
 
 pheatmap(t(log10(dat[ord, cytokines[,1]]+1)), scale = "column", annotation_col = dat[,c("RECIST", "timepoint")], annotation_colors = list(RECIST = recistCol[1:2], timepoint = timeCol), cluster_cols = T, show_colnames = F)

@@ -54,5 +54,23 @@ pairedWilcox = function(k, dat)
              'mean(C2D1-C1D1)' = d2, pValue_BvsC2D2 = p3,'mean(C2D1-B)' = d3))
 }
 
-
+# print the number of pairs between time points
+# the input table should have patientID and timepoint columns
+printPairs = function(dat)
+{
+  library(Matrix)
+  mat = sparseMatrix(i = as.numeric(as.factor(dat$patientID)), 
+                     j = as.numeric(as.factor(dat$timepoint)), x = 1, 
+                     dimnames = list(levels(as.factor(dat$patientID)),
+                                     levels(as.factor(dat$timepoint))))
+  mat = as.data.frame(as.matrix(mat))
+  
+  cat("The number of paired samples between Baseline and C1D1:",
+      mat %>% filter(Baseline == 1 & C1D1 == 1) %>% nrow,"\n")
+  cat("The number of paired samples between Baseline and C2D1:",
+      mat %>% filter(Baseline == 1 & C2D1 == 1) %>% nrow,"\n")
+  cat("The number of paired samples between C2D1 and C1D1:",
+      mat %>% filter(C2D1 == 1 & C1D1 == 1) %>% nrow)
+  
+}
 

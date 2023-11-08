@@ -60,6 +60,11 @@ props = data.frame(
   props, check.names = F)
 
 table(props$timepoint)
+
+# find pairs
+printPairs(props)
+
+
 # bar plot by time point
 clusters = factor(colnames(props)[3:ncol(props)])
 

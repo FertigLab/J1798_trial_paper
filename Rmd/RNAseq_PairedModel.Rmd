@@ -79,17 +79,7 @@ rownames(sampAnnot) = colnames(exprsDat)
 table(sampAnnot$timepoint)
 
 # find pairs
-mat = sparseMatrix(i = as.numeric(as.factor(sampAnnot$patientID)), j = as.numeric(as.factor(sampAnnot$timepoint)), x = 1, 
-             dimnames = list(levels(as.factor(sampAnnot$patientID)),
-                             levels(as.factor(sampAnnot$timepoint))))
-mat = as.data.frame(as.matrix(mat))
-
-cat("The number of paired samples between Baseline and C1D1:",
-mat %>% filter(Baseline == 1 & C1D1 == 1) %>% nrow)
-cat("The number of paired samples between Baseline and C2D1:",
-mat %>% filter(Baseline == 1 & C2D1 == 1) %>% nrow)
-cat("The number of paired samples between C2D1 and C1D1:",
-mat %>% filter(C2D1 == 1 & C1D1 == 1) %>% nrow)
+printPairs(sampAnnot)
 
 ```
 
