@@ -14,3 +14,4 @@ output_data/table_cytokine_wilcox_pvalues.csv
 output_data/table_mIHC_wilcox_pvalues_densities.csv
 output_data/table_mIHC_wilcox_pvalues_percentage.csv
 Rmd/.Rhistory
+Rmd/patientTable_OS_PFS.docx

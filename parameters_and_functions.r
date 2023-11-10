@@ -74,3 +74,43 @@ printPairs = function(dat)
   
 }
 
+#### functions to summarize character and numeric variables for 
+#### table of patient characteristics
+charSummary=function(col,data){
+  x=data[,col]
+  tb=table(x)
+  vTb=as.vector(tb)
+  names(vTb)=names(tb)
+  na=sum(is.na(x))
+  if(na>0) vTb=c(vTb,"NA"=na)
+  return(vTb)
+}
+
+dateSummary=function(x){
+  dateRange=as.character(range(x,na.rm=T))
+  na.ct=sum(is.na(x))
+  
+  return(c(dateRange,na.ct))
+}
+
+
+numSummary=function(col,data){
+  x=data[,col]
+  med=round(median(x,na.rm=T),3)
+  rng=round(range(x,na.rm=T),3)
+  na.ct=sum(is.na(x))
+  ans=c(col,med,paste0(rng,collapse="-"))
+  if(na.ct>0) ans=c(ans,"NA"=na.ct)
+  names(ans)[1:3]=c("Characteristic","Median","Range")
+  return(ans)
+}
+### function to format character summary
+modChar=function(name,dat=charSums){
+  characteristic=c(name,rep("",length(dat[[name]])))
+  vals=c("",names(dat[[name]]))
+  counts=c("",dat[[name]])
+  data=data.frame(characteristic,vals,counts)
+  colnames(data)=c("Characteristic","Median","Range")
+  rownames(data)=NULL
+  return(data)
+}
