@@ -62,7 +62,7 @@ props = data.frame(
 table(props$timepoint)
 
 # find pairs
-printPairs(props)
+mat = printPairs(props)
 
 # bar plot by time point
 clusters = factor(colnames(props)[3:ncol(props)], levels = c("M","B","DNT_I","DNT_II","DNT_III",

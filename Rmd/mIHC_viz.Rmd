@@ -67,7 +67,7 @@ table(dens$timepoint)
 dens = dens %>% filter(timepoint != "PD")
 
 # find pairs
-printPairs(dens)
+mat = printPairs(dens)
 
 ```
 

@@ -72,6 +72,8 @@ printPairs = function(dat)
   cat("The number of paired samples between C2D1 and C1D1:",
       mat %>% filter(C2D1 == 1 & C1D1 == 1) %>% nrow)
   
+  return(mat)
+  
 }
 
 #### functions to summarize character and numeric variables for 

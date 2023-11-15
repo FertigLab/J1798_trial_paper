@@ -79,7 +79,7 @@ rownames(sampAnnot) = colnames(exprsDat)
 table(sampAnnot$timepoint)
 
 # find pairs
-printPairs(sampAnnot)
+mat = printPairs(sampAnnot)
 
 ```
 
@@ -225,6 +225,14 @@ BaselinevC1D1res_TopDE <- BaselinevC1D1res[BaselinevC1D1res$padj < 0.05 &
 #order by logFC
 BaselinevC1D1res_TopDE = BaselinevC1D1res_TopDE[order(BaselinevC1D1res_TopDE$log2FoldChange, decreasing = T),]
 
+# the total number if significantly DE genes
+cat("The number of significantly DE genes:\n",
+nrow(BaselinevC1D1res_TopDE))
+
+# count how many up- and down-regulated genes
+cat("The number of down- and up-regulated genes:\n",
+table(BaselinevC1D1res_TopDE$log2FoldChange >0))
+
 write.csv(BaselinevC1D1res_TopDE, paste0(rootDir,"output_data/Baseline_vs_C1D1_TopDE.csv"))
 
 ```
@@ -250,6 +258,14 @@ BaselinevC2D1res_TopDE <- BaselinevC2D1res[BaselinevC2D1res$padj < 0.05 &
 #order by logFC
 BaselinevC2D1res_TopDE = BaselinevC2D1res_TopDE[order(BaselinevC2D1res_TopDE$log2FoldChange, decreasing = T),]
 
+# the total number if significantly DE genes
+cat("The number of significantly DE genes:\n",
+nrow(BaselinevC2D1res_TopDE))
+
+# count how many up- and down-regulated genes
+cat("The number of down- and up-regulated genes:\n",
+table(BaselinevC2D1res_TopDE$log2FoldChange >0))
+
 write.csv(BaselinevC2D1res_TopDE, paste0(rootDir,"output_data/Baseline_vs_C2D1_TopDE.csv"))
 
 ```
@@ -274,6 +290,14 @@ C1D1vC2D1res_TopDE <- C1D1vC2D1res[C1D1vC2D1res$padj < 0.05 &
                               abs(C1D1vC2D1res$log2FoldChange) > 0.5,]
 #order by logFC
 C1D1vC2D1res_TopDE = C1D1vC2D1res_TopDE[order(C1D1vC2D1res_TopDE$log2FoldChange, decreasing = T),]
+
+# the total number if significantly DE genes
+cat("The number of significantly DE genes:\n",
+nrow(C1D1vC2D1res_TopDE))
+
+# count how many up- and down-regulated genes
+cat("The number of down- and up-regulated genes:\n",
+table(C1D1vC2D1res_TopDE$log2FoldChange >0))
 
 write.csv(C1D1vC2D1res_TopDE, paste0(rootDir,"output_data/C1D1_vs_C2D1_TopDE.csv"))
 

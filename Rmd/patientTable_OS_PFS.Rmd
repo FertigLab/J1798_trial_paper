@@ -83,7 +83,7 @@ ft
 
 ### Primary Objective (N=27 evaluable patients)
 
-To determine the objective response rate (ORR) of entinostat plus nivolumab in patients with unresectable or metastatic cholangiocarcinoma and unresectable or metastatic pancreatic adenocarcinoma, who have progressed after one more two lines of prior therapy.
+To determine the objective response rate (ORR) of entinostat plus nivolumab in patients with unresectable or metastatic pancreatic adenocarcinoma, who have progressed after one more two lines of prior therapy.
 
 
 ```{r ORR.27,echo=F,message=F,warning=F}
@@ -104,26 +104,6 @@ orrTab.ft
 
 ```
 
-### Secondary Objectives
-### Disease Control Rate
-
-
-
-```{r DCR.27,echo=F,message=F,warning=F, eval = F}
-
-resp.dcr=binom.confint(sum(patientTab_27[,"BestResponse"]!="PD"),nrow(patientTab_27),method=c("exact","wilson"))
-orr.dcr=round(resp.dcr$mean[1],3)
-orrCt.dcr=5
-CI.dcr=paste0("(",round(resp.dcr$lower,3),"-",round(resp.dcr$upper,3),")")
-
-#names(CI)=paste0(c("exact","Wilson")," CI")
-orrCt.dcr=table(patientTab_27[,"BestResponse"])
-orrTab.dcr=data.frame("PR"=orrCt.dcr["PR"],"SD"=orrCt["SD"],"PD"=orrCt["PD"],"DCR"=orr.dcr,"exact CI"=CI.dcr[1],"Wilson CI"=CI.dcr[2])
-orrTab.dcr.ft=flextable(orrTab.dcr)
-orrTab.dcr.ft=autofit(orrTab.dcr.ft)
-orrTab.dcr.ft
-
-```
 
 ### Overall Survival (N=30)
 To determine the overall survival (OS) status of subjects with unresectable or metastatic cholangiocarcinoma and unresectable or metastatic pancreatic adenocarcinoma treated with entinostat plus nivolumab at 6 months, at 1, 2 and 3 years.
@@ -155,25 +135,6 @@ medTab.ft
 
 ```
 
-
-#### Overall survival rates at 6, 12, 24, and 36 months, with 95% Confidence Intervals
-
-```{r survOS,echo=F,message=F,warning=F}
-## make and format time table
-osSum=summary(fitOS, times=c(6,12,24,36),extend=T)
-sumSurv=function(x){
-Time=paste0(x$time," Month Survival")
-Survival=round(x$surv,3)
-CI=paste0("(",round(x$lower,3),"-",round(x$upper,3),")")
-ans=data.frame(Time,Survival,CI)
-return(ans)
-}
-
-osTab=sumSurv(osSum)
-osTab.ft=flextable(osTab)
-osTab.ft=autofit(osTab.ft)
-osTab.ft
-```
 
 
 #### K-M plot of overall survival, with at risk table
@@ -210,18 +171,6 @@ medTabPFS.ft=autofit(medTabPFS.ft)
 medTabPFS.ft
 ```
 
-#### Progression Free survival rates at 6, 12, and 24* months, with 95% Confidence Intervals
-*All patients progressed by 24mo. 
-```{r survPFS,echo=F,message=F,warning=F}
-## make and format time table
-pfsSum=summary(fitPFS, times=c(6,12,24),extend=T)
-
-pfsTab=sumSurv(pfsSum)
-pfsTab.ft=flextable(pfsTab)
-pfsTab.ft=autofit(pfsTab.ft)
-pfsTab.ft
-```
-
 
 #### K-M plot of progression free survival, with at risk table
  
@@ -234,34 +183,4 @@ plotPFS
 
 ```
 
-
-### Duration of Response
-To assess the duration of response among subjects who demonstrate an objective response to treatment with entinostat in combination with nivolumab.
-
-
-```{r duration, echo=F, eval = F}
-bestRespDate=data[,77]
-duration=(datePFS-bestRespDate)*12/365
-durV=as.numeric(round(sort(duration),1))
-durV=paste0(durV," Months")
-dur=data.frame(durV)
-colnames(dur)="Duration of response"
-ft.dur=flextable(dur)
-ft.dur=autofit(ft.dur)
-ft.dur
-save.image()
-
-```
-
-
-#### Analysis of Secondary Objectives
-
-Median time to event will be calculated and reported with confidence intervals.
-
-OS curves, OS medians with 95% CIs, and OS rates at 6, 12, 24 and 36 months with 95% CIs will be estimated using Kaplan-Meier methodology
-
-PFS curves, PFS medians with 95% CIs, and PFS rates at 6, 12 and 24 months with 95% CIs will be estimated using Kaplan-Meier methodology.
-
-
-Duration of response (DOR) will be calculated for subjects who achieve a best overall response of CR or PR with entinostat in combination with nivolumab. For such subjects, duration of response is defined as the number of weeks from the start date of PR or CR (whichever response is recorded first) and subsequently confirmed to the first date that recurrent or progressive disease or death is documented. DOR will be summarized descriptively.
 
