@@ -87,17 +87,17 @@ To determine the objective response rate (ORR) of entinostat plus nivolumab in p
 
 
 ```{r ORR.27,echo=F,message=F,warning=F}
-patientTab_27=patientTab[which(!is.na(patientTab[,"BestResponse"])),]
+# exclude patients with toxicity
+patientTab_27=patientTab[which(patientTab[,"Reason.off.Study"] != "Toxicity"),]
 
-test=binom.test(length(grep("R",patientTab_27[,"BestResponse"])),nrow(patientTab_27),p=0.05,alternative="greater")
-resp=binom.confint(length(grep("R",patientTab_27[,"BestResponse"])),nrow(patientTab_27),method=c("exact","wilson"))
+test=binom.test(length(grep("^Responder",patientTab_27[,"RECIST"])),nrow(patientTab_27),p=0.05,alternative="greater")
+resp=binom.confint(length(grep("^Responder",patientTab_27[,"RECIST"])),nrow(patientTab_27),method=c("exact","wilson"))
 orr=round(resp$mean[1],3)
 orrCt=3
 CI=paste0("(",round(resp$lower,3),"-",round(resp$upper,3),")")
 p=round(test$p.value,3)
 #names(CI)=paste0(c("exact","Wilson")," CI")
-orrCt=table(patientTab_27[,"BestResponse"])
-orrTab=data.frame("PR"=orrCt["PR"],"SD"=orrCt["SD"],"PD"=orrCt["PD"],"ORR"=orr,"exact CI"=CI[1],"Wilson CI"=CI[2],"p-value"=p)
+orrTab=data.frame("ORR"=orr,"exact CI"=CI[1],"p-value"=p)
 orrTab.ft=flextable(orrTab)
 orrTab.ft=autofit(orrTab.ft)
 orrTab.ft
