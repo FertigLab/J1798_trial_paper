@@ -124,7 +124,7 @@ medOS=as.data.frame(median(x))
 if(is.na(medOS$upper)) medOS$upper=Inf
 Median=round(medOS$q,3)
 CI=paste0("(",round(medOS$lower,3),"-",round(medOS$upper,3),")")
-return(data.frame("Median Survival"=Median,"CI"=CI))
+return(data.frame("Median Survival"=Median,"CI"=CI, check.names = F))
 }
 
 medTab=sumMed(survOS)
@@ -142,10 +142,16 @@ medTab.ft
 
 ```{r OS.KM, echo=F, fig.height= 5}
 ## make and format plot with at risk table
-plotOS=ggsurvplot(fitOS,data=survOS,risk.table = TRUE,legend="none",title="Overall Survival") + xlab("Time (Months)") 
+plotOS=ggsurvplot(fitOS,data=survOS,risk.table = TRUE,legend="none",title="Overall Survival") + xlab("Time (Months)")
+
+plotOS$plot = plotOS$plot +
+  # add horizontal line at median
+  geom_hline(yintercept = .5, linetype="dashed", color = 'grey25',) +
+  # add numbers for median survival and CI
+  annotate("text", x = 25, y = 0.65,size = 3.5, 
+           label = paste0("Median Survival\n",medTab[1]," [95% CI ",medTab[2],"]"))
 
 plotOS
-
 ```
 
 
@@ -179,8 +185,15 @@ medTabPFS.ft
 ## make and format plot with at risk table
 plotPFS=ggsurvplot(fitPFS,data=survPFS,risk.table = TRUE,legend="none",title="Progression Free Survival")+
   xlab("Time (Months)") 
-plotPFS
 
+plotPFS$plot = plotPFS$plot +
+  # add horizontal line at median
+  geom_hline(yintercept = .5, linetype="dashed", color = 'grey25',) +
+  # add numbers for median survival and CI
+  annotate("text", x = 15, y = 0.65,size = 3.5, 
+           label = paste0("Median Survival\n",medTab[1]," [95% CI ",medTab[2],"]"))
+
+plotPFS
 ```
 
 
