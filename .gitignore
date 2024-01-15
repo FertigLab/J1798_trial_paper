@@ -15,3 +15,5 @@ output_data/table_mIHC_wilcox_pvalues_densities.csv
 output_data/table_mIHC_wilcox_pvalues_percentage.csv
 Rmd/.Rhistory
 Rmd/patientTable_OS_PFS.docx
+.Rhistory
+*.png
