@@ -2,6 +2,10 @@
 # functions and parameters
 # to use the same colors and annotation in the figures
 
+# create output folder if it doesn't exist
+outputFolder = "./output_data"
+if(!file.exists(outputFolder)) dir.create(outputFolder)
+
 # labels for time points
 timeLab  = c("Baseline", "C1D1", "C2D1")
 
