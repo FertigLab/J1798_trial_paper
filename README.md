@@ -1,6 +1,15 @@
 # Overview
 
-This repository contains input data and code to generate figures to be published in the paper by M. Baretti et al. "Immunomodulation of the tumor microenvironment of pancreatic ductal adenocarcinoma with histone deacetylase inhibition: results of a phase 2 clinical trial of entinostat in combination with nivolumab". All input data are stored in the `input_data` folder. The Rmarkdown files are stored in the `Rmd` folder. The main script is `runRmd.r` that installs all required packages and renders Rmd files to generate output tables in the `output_data` folder and html/docs reports in `Rmd`. 
+This repository contains code to generate figures to be published in the paper by M. Baretti et al. "Immunomodulation of the tumor microenvironment of pancreatic ductal adenocarcinoma with histone deacetylase inhibition: results of a phase 2 clinical trial of entinostat in combination with nivolumab". 
+
+## Input data
+Restrictions apply to availability of patient data and so are not publicly available. However, the supporting data files which included limited deidentified clinical and biomarker data associated with the manuscript will be available upon reasonable request with permission from Vivli. The 
+
+## Rmarkdown
+Rmarkdown files are stored in the `Rmd` folder. The main script is `runRmd.r` that installs all required packages and renders Rmd files to generate output tables in the `output_data` folder and html/docs reports in `Rmd`. 
+
+## Output data
+The `output_data` folder contatins html/docs reports rendered from Rmarkdown files, as well as output table with the analysis results.
 
 # System requirements
 
