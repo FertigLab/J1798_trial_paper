@@ -16,12 +16,9 @@ for(p in packageList) if(!require(p,character.only = TRUE, quietly = TRUE)) pkgs
 if (!is.null(pkgsToInstall) & !require("BiocManager", quietly = TRUE))
 {
     install.packages("BiocManager")
-    for(p in pkgsToInstall) 
-    {
-        BiocManager::install(p)
-        library(p)
-    }
+        BiocManager::install(pkgs = pkgsToInstall)
 }
+for(p in pkgsToInstall) library(p, character.only = TRUE, quietly = TRUE)
 
 # list all rmd files
 files = list.files(path = "Rmd/", pattern = ".Rmd", full.names = T)
