@@ -3,13 +3,13 @@
 This repository contains code to generate figures to be published in the paper by M. Baretti et al. "Immunomodulation of the tumor microenvironment of pancreatic ductal adenocarcinoma with histone deacetylase inhibition: results of a phase 2 clinical trial of entinostat in combination with nivolumab". 
 
 ## Input data
-Restrictions apply to availability of patient data and so are not publicly available. However, the input data files which included limited deidentified clinical and biomarker data associated with the manuscript will be available upon reasonable request to the corresponding authors and establishing of a data use agreement (DUA). 
+Restrictions apply to the availability of patient data and so are not publicly available. However, the input data files which included limited deidentified clinical and biomarker data associated with the manuscript will be available upon reasonable request to the corresponding authors and establishing of a data use agreement (DUA). 
 
 ## Rmarkdown
-Rmarkdown files are stored in the `Rmd` folder. The main script is `runRmd.r` that installs all required packages and renders Rmd files to generate output tables in the `output_data` folder and html/docs reports in `Rmd`. 
+Rmarkdown files are stored in the `Rmd` folder. The main script is `runRmd.r` which installs all required packages and renders Rmd files to generate output tables in the `output_data` folder and html/docs reports in `Rmd`. 
 
 ## Output data
-The `output_data` folder contatins html/docs reports rendered from Rmarkdown files, as well as output table with the analysis results.
+The `output_data` folder contains html/docs reports rendered from Rmarkdown files, as well as output tables with the analysis results.
 
 # System requirements
 
@@ -17,12 +17,12 @@ The code can be run on any computer with installed the R programming environment
 
 # How to run
 
-Open the R enviroment and run the following line:
+Open the R environment and run the following line:
 
 ```
 source('runRmd.r')
 ```
-The code was tested on Windows 10 Pro with 32.0 GB RAM and the 2.81 GHz processor. If all required packages are installed, the runtime of the script is about 10 minutes. The script was test in R version 4.3.2 and the following packages:
+The code was tested on Windows 10 Pro with 32.0 GB RAM and a 2.81 GHz processor. If all required packages are installed, the runtime of the script is about 10 minutes. The script was tested in R version 4.3.2 and the following packages:
 ```
 ## R version 4.3.2 (2023-10-31 ucrt)
 ## Platform: x86_64-w64-mingw32/x64 (64-bit)
