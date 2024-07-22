@@ -3,7 +3,7 @@
 This repository contains code to generate figures to be published in the paper by M. Baretti et al. "Immunomodulation of the tumor microenvironment of pancreatic ductal adenocarcinoma with histone deacetylase inhibition: results of a phase 2 clinical trial of entinostat in combination with nivolumab". 
 
 ## Input data
-Restrictions apply to the availability of patient data and so are not publicly available. However, the input data files which included limited deidentified clinical and biomarker data associated with the manuscript will be available upon reasonable request to the corresponding authors and establishing of a data use agreement (DUA). 
+Most of the input data are available in the `input_data` folder. Restrictions apply to the availability of patient data and so are not publicly available. However, the patient data files which included limited deidentified clinical data associated with the manuscript will be available upon reasonable request to the corresponding authors and will be accessable on dbGaP (phs003615). 
 
 ## Rmarkdown
 Rmarkdown files are stored in the `Rmd` folder. The main script is `runRmd.r` which installs all required packages and renders Rmd files to generate output tables in the `output_data` folder and html/docs reports in `Rmd`. 
