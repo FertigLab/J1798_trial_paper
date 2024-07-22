@@ -1,6 +1,6 @@
 # Overview
 
-This repository contains code to generate figures to be published in the paper by M. Baretti et al. "Immunomodulation of the tumor microenvironment of pancreatic ductal adenocarcinoma with histone deacetylase inhibition: results of a phase 2 clinical trial of entinostat in combination with nivolumab". 
+This repository contains code to generate figures for the paper by M. Baretti et al. "Entinostat in combination with nivolumab in metastatic pancreatic ductal adenocarcinoma: a phase 2 clinical trial" accepted for publication in Nature Communications. 
 
 ## Input data
 Most of the input data are available in the `input_data` folder. Restrictions apply to the availability of patient data and so the 
