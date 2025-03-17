@@ -1,6 +1,6 @@
 # Overview
 
-This repository contains code to generate figures for the paper by M. Baretti et al. "Entinostat in combination with nivolumab in metastatic pancreatic ductal adenocarcinoma: a phase 2 clinical trial" accepted for publication in Nature Communications. 
+This repository contains code to generate figures for the paper by M. Baretti et al. "Entinostat in combination with nivolumab in metastatic pancreatic ductal adenocarcinoma: a phase 2 clinical trial" published in Nature Communications: https://www.nature.com/articles/s41467-024-52528-7. 
 
 ## Input data
 Most of the input data are available in the `input_data` folder. Restrictions apply to the availability of patient data and so the 
