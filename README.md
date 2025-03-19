@@ -4,7 +4,7 @@ This repository contains code to generate figures for the paper by M. Baretti et
 
 ## Input data
 Most of the input data are available in the `input_data` folder. Restrictions apply to the availability of patient data and so the 
-`table_patients.csv` file is not publicly available. However, the patient data files which included limited deidentified clinical data associated with the manuscript will be available upon reasonable request to the corresponding authors and will be accessable through dbGaP (phs003615). 
+`table_patients.csv` file is not publicly available. However, the patient data files which included limited deidentified clinical data associated with the manuscript will be available upon reasonable request to the corresponding authors and is accessible through dbGaP (phs003615): https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs003615.v1.p1. 
 
 ## Rmarkdown
 Rmarkdown files are stored in the `Rmd` folder. The main script is `runRmd.r` which installs all required packages and renders Rmd files to generate output tables in the `output_data` folder and html/docs reports in `Rmd`. 
